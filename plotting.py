@@ -75,7 +75,8 @@ def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, ytickoff
             color = generate_contrasting_color(idx, len(datasets), seed=105, bg_hex=background_color)
         elif color is None:
             color = "black"
-
+        #add a line on the x-axis at y = 1377
+        ax.axhline(y=1377, color='blue', linestyle='--', linewidth=1, zorder=1)
         ax.errorbar(xdata, ydata, color=color, marker='x', linestyle='none', yerr=y_error, xerr=x_error, capsize=5, elinewidth=1, capthick=1, clip_on=False, zorder=3, label=label)
 
         # Adding grey zones to show the excluded areas of the fit
