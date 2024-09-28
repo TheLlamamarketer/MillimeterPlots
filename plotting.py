@@ -4,16 +4,16 @@ import colorsys
 import matplotlib.colors as mcolors
 import random
 
-def generate_contrasting_color(index, total, bg_hex='#eb3107', seed=None):
-    if seed is not None:
-        random.seed(seed + index)
+def generate_contrasting_color(index, total, bg_hex='#eb3107', color_seed=None):
+    if color_seed is not None:
+        random.seed(color_seed + index)
     # Convert background color to HSV
     bg_rgb = mcolors.hex2color(bg_hex)
     bg_hsv = colorsys.rgb_to_hsv(*bg_rgb)
     bg_hue = bg_hsv[0]
 
     # Introduce a small random variation in hue
-    hue_variation = random.uniform(-0.1, 0.1) if seed is not None else 0
+    hue_variation = random.uniform(-0.1, 0.1) if color_seed is not None else 0
     hue = (bg_hue + 0.5 + (index / max(1, total - 1)) * 0.5 + hue_variation) % 1.0 if total > 1 else (bg_hue + 0.5) % 1.0
     saturation = 0.7
     value = 0.6
@@ -24,8 +24,7 @@ def generate_contrasting_color(index, total, bg_hex='#eb3107', seed=None):
     return '#%02x%02x%02x' % tuple(int(c * 255) for c in rgb)
 
 colors= ['#eb3107', '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-# '#eb3107'
-def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, ytickoffset=0, xtickoffset=0, grey_zones=None, width=20, height=28, background_color='#eb3107', x_label=None, y_label=None, legend_position='best'):
+def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, ytickoffset=0, xtickoffset=0, grey_zones=None, width=20, height=28, background_color='#eb3107', x_label=None, y_label=None, legend_position='best', color_seed = 200):
     fig, ax = plt.subplots(figsize=(width / 2.54, height / 2.54))
     aspect_ratio = (xmax - xmin) / (ymax - ymin) * (height / width)
     ax.set_aspect(aspect_ratio, adjustable='box')
@@ -72,11 +71,9 @@ def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, ytickoff
 
         # If no color is provided, generate a random one if there are multiple datasets, otherwise use black
         if len(datasets) > 1 and color is None:
-            color = generate_contrasting_color(idx, len(datasets), seed=105, bg_hex=background_color)
+            color = generate_contrasting_color(idx, len(datasets), color_seed, bg_hex=background_color)
         elif color is None:
             color = "black"
-        #add a line on the x-axis at y = 1377
-        ax.axhline(y=1377, color='blue', linestyle='--', linewidth=1, zorder=1)
         ax.errorbar(xdata, ydata, color=color, marker='x', linestyle='none', yerr=y_error, xerr=x_error, capsize=5, elinewidth=1, capthick=1, clip_on=False, zorder=3, label=label)
 
         # Adding grey zones to show the excluded areas of the fit
