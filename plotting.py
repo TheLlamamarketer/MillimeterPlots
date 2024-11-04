@@ -24,7 +24,7 @@ def generate_contrasting_color(index, total, bg_hex='#eb3107', color_seed=None):
     return '#%02x%02x%02x' % tuple(int(c * 255) for c in rgb)
 
 colors= ['#eb3107', '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, ytickoffset=0, xtickoffset=0, grey_zones=None, width=20, height=28, background_color='#eb3107', x_label=None, y_label=None, legend_position='best', color_seed = 200):
+def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, marker='x', line='None', ytickoffset=0, xtickoffset=0, grey_zones=None, width=20, height=28, background_color='#eb3107', x_label=None, y_label=None, legend_position='best', color_seed=200):
     fig, ax = plt.subplots(figsize=(width / 2.54, height / 2.54))
     aspect_ratio = (xmax - xmin) / (ymax - ymin) * (height / width)
     ax.set_aspect(aspect_ratio, adjustable='box')
@@ -74,7 +74,8 @@ def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, ytickoff
             color = generate_contrasting_color(idx, len(datasets), color_seed, bg_hex=background_color)
         elif color is None:
             color = "black"
-        ax.errorbar(xdata, ydata, color=color, marker='x', linestyle='none', yerr=y_error, xerr=x_error, capsize=5, elinewidth=1, capthick=1, clip_on=False, zorder=3, label=label)
+
+        ax.errorbar(xdata, ydata, color=color, marker=marker, linestyle=line, yerr=y_error, xerr=x_error, capsize=5, linewidth=0.8, elinewidth=1, capthick=1, clip_on=False, zorder=3, label=label)
 
         # Adding grey zones to show the excluded areas of the fit
         if grey_zones:
@@ -107,8 +108,7 @@ def plot_data(filename, datasets, ymin, ymax, ystep, xmax, xmin, xstep, ytickoff
 
     if y_label:
         plt.ylabel(y_label)
-
-
+      
     plt.tight_layout()
     plt.savefig(filename, format='pdf')
     plt.show()
