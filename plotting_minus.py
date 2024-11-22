@@ -21,19 +21,22 @@ def generate_contrasting_color(index, total, bg_hex='#FFFFFF', color_seed=None):
     rgb = colorsys.hsv_to_rgb(hue, saturation, value)
     return '#%02x%02x%02x' % tuple(int(c * 255) for c in rgb)
 
-def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='best', color_seed=203, width=20, height=28):
+def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='best', color_seed=203, width=20, height=28, plot=True):
     fig, ax = plt.subplots(figsize=(width/2.54, height/2.54))
  
     # Plot each dataset
     for idx, data in enumerate(datasets):
-        xdata = np.array(data['xdata'], dtype=float)
-        ydata = np.array(data['ydata'], dtype=float)
+        xdata = np.array(data['xdata'], dtype=float) if 'xdata' in data and data['xdata'] is not None else None
+        ydata = np.array(data['ydata'], dtype=float) if 'ydata' in data and data['ydata'] is not None else None
         y_error = np.array(data['y_error'], dtype=float) if 'y_error' in data and data['y_error'] is not None else None
         x_error = np.array(data['x_error'], dtype=float) if 'x_error' in data and data['x_error'] is not None else None
         color = data.get('color')
         label = data.get('label')
         marker = data.get('marker', 'x')
         line = data.get('line', '-')
+        confidence = data.get('confidence', False)
+        low_bound = data.get('low_bound')
+        high_bound = data.get('high_bound')
 
         # Generate color if not specified
         if len(datasets) > 1 and color is None:
@@ -41,12 +44,15 @@ def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='b
         elif color is None:
             color = "black"
 
-        ax.grid(True)
+        ax.grid(True, which='major')
+        ax.grid(True, which='minor', color='#EEEEEE', linestyle=':', linewidth=0.5)
+        ax.minorticks_on()
 
         # Plot data points with error bars
-        if y_error is None and x_error is None:
-            ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line, clip_on=False, label=label)
-
+        if confidence:
+            ax.fill_between(xdata, low_bound, high_bound, color='gray', alpha=0.5, label=label)
+        elif y_error is None and x_error is None:
+            ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line, clip_on=False, label=label,  markersize=10)
         else:
             ax.errorbar(xdata, ydata, color=color, marker=marker, linestyle='none', 
                     yerr=y_error, xerr=x_error, capsize=4, elinewidth=1, 
@@ -64,4 +70,8 @@ def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='b
 
     plt.tight_layout()
     plt.savefig(filename, format='pdf')
-    plt.show()
+
+    if plot:
+        plt.show()
+    else:
+        plt.close()

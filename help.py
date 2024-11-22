@@ -17,14 +17,15 @@ def round_val(val, err=0, intermed=True):
 
     if err == 0:
         power = power + (n - 1) if power > 0 else n
-        return round(val, power)
+        return round(val, power), power
 
     else:
         power += n - 1
         factor = 10**power
         err_round = np.ceil(err * factor) / factor
         power = FirstSignificant(err_round)
-        return round(val, power), err_round
+        if intermed: power += 1
+        return round(val, power), err_round, power
 
 
 def support(xdata, ydata, yerr):  # Support function for main

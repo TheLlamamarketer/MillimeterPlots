@@ -1,42 +1,62 @@
+from decimal import Decimal, ROUND_HALF_UP
+
+def dec(value, max_precision=9, fixed_precision=None):
+    decimal_value = Decimal(value)
+    
+    if fixed_precision is not None:
+        precision = fixed_precision
+    elif abs(decimal_value) < 1:
+        precision = min(max_precision, abs(decimal_value.as_tuple().exponent) + 2)
+    else:
+        precision = max_precision - 2
+
+    quantize_str = f"1.{'0' * precision}"
+    rounded_value = decimal_value.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
+
+    if fixed_precision is None:
+        # Remove trailing zeros if no fixed precision is specified
+        return str(rounded_value).rstrip('0').rstrip('.') if '.' in str(rounded_value) else str(rounded_value)
+    else:
+        # Keep trailing zeros to the specified fixed precision
+        return f"{rounded_value:.{precision}f}"
+
+
 def print_standard_table(
     data,
-    headers,
-    header_to_key_map,
+    headers,  # Use headers directly, now keyed by data keys
     header_groups=None,
     caption=None,
     label=None,
-    precision=None,
     column_formats=None,
     si_setup=None,
+    show=True
 ):
     """
     Prints a standard LaTeX table with optional group headers, specified precision, and column-specific formats.
 
     Parameters:
-    - data (dict): Dictionary containing the data for the table. Each key corresponds to a column name.
-    - headers (list): List of LaTeX formatted headers (e.g., "{$h_0$ (mm)}").
-    - header_to_key_map (dict): Dictionary mapping headers to corresponding keys in the data.
-    - header_groups (list of tuples): Optional group headers in the form (group_name, number_of_columns). For example: [("Group 1", 3), ("Group 2", 2)].
+    - data (dict): Dictionary containing the data for the table.
+    - headers (dict): Dictionary mapping data keys to a dictionary with "label" and "precision".
+    - header_groups (list of tuples): Optional group headers in the form (group_name, number_of_columns).
     - caption (str): The caption for the table.
     - label (str): The label for referencing the table in LaTeX.
-    - precision (dict): Dictionary specifying the precision for each column (e.g., {"column1": 2, "column2": 3}).
-    - column_formats (list): List of specific `table-format` strings for each column, e.g., ["4.0", "4.2", "2.2", "1.2"].
-    - si_setup (str): The siunitx package settings for numerical formatting for the entire table if no specific format is provided for columns.
+    - column_formats (list): List of specific `table-format` strings for each column.
+    - si_setup (str): The siunitx package settings for numerical formatting for the entire table if no specific format is provided.
     """
-    # Number of columns
+    if not show:
+        return
+
     num_columns = len(headers)
 
     # Create layout for tabular environment based on column-specific formats if provided
     if column_formats:
         layout = "|".join([f"S[table-format={fmt}]" for fmt in column_formats])
     else:
-        # Use default si_setup for all columns if column-specific formats are not provided
         layout = (
             "|".join([f"S[{si_setup}]" for _ in range(num_columns)])
             if si_setup
             else "|".join(["c" for _ in range(num_columns)])
         )
-
     layout = f"| {layout} |"
 
     # Print LaTeX table preamble
@@ -45,9 +65,7 @@ def print_standard_table(
     if caption:
         print(f"    \\caption{{{caption}}}")
     if si_setup and not column_formats:
-        print(
-            f"    \\sisetup{{{si_setup}}}"
-        )  # Apply si_setup globally only if no column-specific format is provided
+        print(f"    \\sisetup{{{si_setup}}}")  # Apply si_setup globally only if no column-specific format is provided
     print(f"    \\begin{{tabular}}{{{layout}}}")
     print("    \\toprule")
 
@@ -59,30 +77,41 @@ def print_standard_table(
         print(f"    {group_row} \\\\")
         print("    \\midrule")
 
-    # Print main headers
-    header_row = " & ".join(headers) + " \\\\"
+    # Print main headers derived from headers values (using label)
+    header_row = " & ".join(entry["label"] for entry in headers.values()) + " \\\\"
     print(f"    {header_row}")
     print("    \\midrule")
 
-    # Determine number of rows in the table based on the length of the first column in data
-    first_key = list(data.keys())[0]
-    num_rows = len(data[first_key])
+    max_rows = max(len(data[key]) for key in headers)
 
     # Print data rows
-    for row in range(num_rows):
+    for row in range(max_rows):
         row_data = []
-        for header in headers:
-            # Retrieve the corresponding key for this header
-            col_key = header_to_key_map[header]
+        for key, entry in headers.items():
+            
+            try:
+                value = data[key][row] if row < len(data[key]) else ""
+                
+                fixed_precision = entry["precision"] if "precision" in entry else None
+                if isinstance(fixed_precision, list):
+                    fixed_precision = fixed_precision[row] if row < len(fixed_precision) else None
 
-            # Retrieve the value for this row and column using the key
-            value = data[col_key][row]
+                # Format the value based on its type
+                if isinstance(value, str):
+                    formatted_value = "{" + value + "}"
+                elif "err" in entry and isinstance(entry["err"], list):
+                    error = entry["err"][row] if row < len(entry["err"]) else ""
+                    formatted_value = "{$" + f"{dec(value, fixed_precision=fixed_precision)}" + " \\pm " + f"{dec(error, fixed_precision=fixed_precision)}" "$}"
+                else:
+                    formatted_value = "{$" + f"{dec(value, fixed_precision=fixed_precision)}" + "$}"
 
-            # Format the value based on the precision, if specified
-            if precision and col_key in precision:
-                formatted_value = f"{value:.{precision[col_key]}f}"
-            else:
-                formatted_value = f"{value}"
+
+            except (IndexError, KeyError) as e:
+                formatted_value = "{Error}"
+                print(f"Error processing row {row}, column {key}: {e}")
+            except Exception as e:
+                formatted_value = "{Error}"
+                print(f"Unexpected error processing row {row}, column {key}: {e}")
 
             row_data.append(formatted_value)
 
@@ -97,7 +126,6 @@ def print_standard_table(
         print(f"    \\label{{{label}}}")
     print("\\end{table}")
 
-
 # Example usage for a table with column-specific formatting:
 
 # Example data dictionary
@@ -108,15 +136,7 @@ data_example = {
     "E": [1.173, 1.333, 0.662, 0.511, 1.275, 0.027, 0.056],
 }
 
-# LaTeX formatted headers
-headers_example = [
-    "{Peak}",
-    "{$a$(\\#)}",
-    "{$b$(\\#)}",
-    "{E (MeV)}",
-]
-
-# Mapping of headers to data dictionary keys
+# Mapping of LaTeX-formatted headers to data dictionary keys
 header_to_key_map_example = {
     "{Peak}": "peak",
     "{$a$(\\#)}": "a",
@@ -125,21 +145,18 @@ header_to_key_map_example = {
 }
 
 # Column-specific formatting for table
-column_formats_example = ["4.0", "4.2", "2.2", "1.2"]
+column_formats_example = ["4.0", "4.2", "2.1", "0.2"]
 
 # Caption and label for the table
 caption_example = "Messdaten zur Analyse verschiedener Isotope"
 label_example = "tab:IsotopAnalyse"
 
 # Print a table with column-specific formatting
+'''
 print_standard_table(
     data=data_example,
-    headers=headers_example,
     header_to_key_map=header_to_key_map_example,
     column_formats=column_formats_example,
     caption=caption_example,
     label=label_example,
-)
-
-
-# Still a very work in progress
+)'''
