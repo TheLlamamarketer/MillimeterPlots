@@ -1,3 +1,4 @@
+from re import S
 import wave
 import numpy as np
 from plotting_minus import plot_data
@@ -8,6 +9,8 @@ from help import *
 from scipy.optimize import curve_fit
 from tables import *
 from scipy.optimize import fsolve
+from numpy.random import multivariate_normal
+from scipy.ndimage import gaussian_filter1d
 
 data = {
     "angle": [129.15, 129.25, 130.03, 131.1, 131.17, 131.69, 132.0, 132.03, 132.36, 132.64, 132.74, 132.82],
@@ -150,13 +153,14 @@ data_val = sorted(zip(data["gamma"], data["wavelength"]))
 x = [point[0] for point in data_val]
 y = [point[1] for point in data_val]
 
-x_error = np.full_like(x, 0.02)
+dx = 0.02
+
+x_error = np.full_like(x, dx)
 
 x2 = sorted(data["gamma_2"])
 
 
-spline = UnivariateSpline(x, y, s=100, k=4) 
-# Generate points for plotting the spline fit
+spline = UnivariateSpline(x, y, s=200, k=4) 
 angle_smooth = np.linspace(min(x), max(x), 1000)
 wavelength_smooth = spline(angle_smooth)
 
@@ -166,51 +170,44 @@ def monte_carlo_spline_uncertainty(
     x, y, x_error=None, y_error=None, 
     spline_kwargs=None, n_simulations=1000, 
     x_smooth=None, confidence=95):
-    # Ensure x and y are NumPy arrays
+
     x = np.array(x)
     y = np.array(y)
     
-    # Set default spline parameters if not provided
     if spline_kwargs is None:
-        spline_kwargs = {'s': 0, 'k': 3}  # Default to cubic spline with no smoothing
+        spline_kwargs = {'s': 0, 'k': 3} 
     
-    # Create x_smooth if not provided
     if x_smooth is None:
         x_smooth = np.linspace(np.min(x), np.max(x), 200)
     
-    # Initialize arrays to store spline predictions and derivatives
-    spline_predictions = np.zeros((n_simulations, len(x_smooth)))
-    spline_derivatives = np.zeros((n_simulations, len(x_smooth)))
+    spline_predictions, spline_derivatives = np.zeros((n_simulations, len(x_smooth))), np.zeros((n_simulations, len(x_smooth)))
     
     # Monte Carlo simulation
+    if x_error is not None:
+        x_simulated = np.array([x + np.random.normal(0, x_error, size=len(x)) for _ in range(n_simulations)])
+    else:
+        x_simulated = np.tile(x, (n_simulations, 1))
+ 
+    if y_error is not None:
+        y_simulated = np.array([y + np.random.normal(0, y_error, size=len(y)) for _ in range(n_simulations)])
+    else:
+        y_simulated = np.tile(y, (n_simulations, 1))
+
+    # Ensure that simulated data is within the valid range
+    x_simulated = np.clip(x_simulated, np.min(x), np.max(x))
+    y_simulated = np.clip(y_simulated, np.min(y), np.max(y))
+
     for i in range(n_simulations):
-        # Simulate x-values if x_error is provided
-        if x_error is not None:
-            x_simulated = x + np.random.normal(0, x_error, size=len(x))
-        else:
-            x_simulated = x.copy()
-        
-        # Simulate y-values if y_error is provided
-        if y_error is not None:
-            y_simulated = y + np.random.normal(0, y_error, size=len(y))
-        else:
-            y_simulated = y.copy()
-        
-        # Sort x_simulated and corresponding y_simulated to maintain order
-        sorted_indices = np.argsort(x_simulated)
-        x_sim = x_simulated[sorted_indices]
-        y_sim = y_simulated[sorted_indices]
-        
-        # Fit spline to simulated data
+        sorted_indices = np.argsort(x_simulated[i])
+        x_sim = x_simulated[i][sorted_indices]
+        y_sim = y_simulated[i][sorted_indices]
+
         try:
             spline_sim = UnivariateSpline(x_sim, y_sim, **spline_kwargs)
-            # Evaluate spline on the grid
             spline_predictions[i, :] = spline_sim(x_smooth)
-            # Evaluate derivative of spline on the grid
             spline_derivatives[i, :] = spline_sim.derivative()(x_smooth)
         except Exception as e:
             print(f"Simulation {i} failed: {e}")
-            # Handle exceptions or set predictions to NaN
             spline_predictions[i, :] = np.nan
             spline_derivatives[i, :] = np.nan
     
@@ -220,36 +217,26 @@ def monte_carlo_spline_uncertainty(
     spline_derivatives = spline_derivatives[valid_indices]
     
     # Compute mean and confidence intervals for spline predictions
-    mean_spline = np.nanmean(spline_predictions, axis=0)
-    lower_percentile = (100 - confidence) / 2
-    upper_percentile = 100 - lower_percentile
-    lower_bound = np.nanpercentile(spline_predictions, lower_percentile, axis=0)
-    upper_bound = np.nanpercentile(spline_predictions, upper_percentile, axis=0)
-    
-    # Compute mean and confidence intervals for spline derivatives
+    median_spline = np.nanmedian(spline_predictions, axis=0)
     mean_derivative = np.nanmean(spline_derivatives, axis=0)
-    lower_bound_derivative = np.nanpercentile(spline_derivatives, lower_percentile, axis=0)
-    upper_bound_derivative = np.nanpercentile(spline_derivatives, upper_percentile, axis=0)
+
+
+    bounds = lambda data: (np.nanpercentile(data, (100 - confidence) / 2, axis=0), 
+                           np.nanpercentile(data, 100 - (100 - confidence) / 2, axis=0))
+    lower_bound_spline, upper_bound_spline = bounds(spline_predictions)
+    lower_bound_spline_derivative, upper_bound_spline_derivative = bounds(spline_derivatives)
     
-    return (mean_spline, lower_bound, upper_bound, 
-            mean_derivative, lower_bound_derivative, upper_bound_derivative,
+    return (median_spline, lower_bound_spline, upper_bound_spline, 
+            mean_derivative, lower_bound_spline_derivative, upper_bound_spline_derivative,
             spline_predictions, spline_derivatives)
 
-(mean_spline, lower_bound, upper_bound, 
+
+(median_spline, lower_bound, upper_bound, 
  mean_derivative, lower_bound_derivative, upper_bound_derivative,
  spline_predictions, spline_derivatives) = monte_carlo_spline_uncertainty(
     x, y, x_error=x_error, y_error=None, 
-    spline_kwargs={'s':100, 'k':4}, 
-    n_simulations=1000, x_smooth=angle_smooth, confidence=95)
-
-
-
-Zn_spectrum  = [468, 471.3, 472.2, 481.1, 518.2, 589.4, 602.1, 636.6, 648.2, 692.8, 693.8]
-
-def find_x_for_y(y_target, spline, initial_guess):
-    return fsolve(lambda x: spline(x) - y_target, x0=initial_guess)[0]
-
-initial_guesses = [find_x_for_y(y, spline, initial_guess) for y, initial_guess in zip(Zn_spectrum, [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.6, 0.6, 0.6, 0.6, 0.6])]
+    spline_kwargs={'s':200, 'k':4}, 
+    n_simulations=3000, x_smooth=angle_smooth, confidence=95)
 
 
 plot_data(
@@ -258,10 +245,9 @@ plot_data(
         {
             "xdata": x,
             "ydata": y,
-            "x_error": [0.02] ,
+            "x_error": [dx] ,
             "label": "Hg Spektrum",
             "marker": ".",
-
         },
         {
             "xdata": angle_smooth,
@@ -275,36 +261,30 @@ plot_data(
             "low_bound": lower_bound,
             "high_bound": upper_bound,
             "label": "95% Konfidenzintervall",
+            "color": "gray",
         },
         {
             "xdata": x2,
             "ydata": spline(x2),
             "marker": "*",
-            "x_error": [0.02],
+            "x_error": [dx],
             "label":"Unbekannte Lampe mit λ von Kalibrierkurve"
         },
         {
             "xdata": data["angle_1"],
             "ydata": data["wavelength_1"],
             "marker": "x",
-            "x_error": [0.02],
+            "x_error": [dx],
             "label":"Zn Spektrum mit Winkeln von Unbekannter Lampe"
         },
         {
             "xdata": [48.27],
             "ydata": [636.6],
             "marker": "x",
-            "x_error": [0.02],
+            "x_error": [dx],
             "label": "Zn 546.1nm mit Originalwinkel ",
             "color": "red"
         },
-        #{
-        #    "ydata":Zn_spectrum,
-        #    "xdata": [find_x_for_y(y, spline, initial_guess) for y, initial_guess in zip(Zn_spectrum, initial_guesses)],
-        #    "marker":"+",
-        #    "label":"Zn Spektrum",
-        #    "line":"None"
-        #}
     ],
 
     x_label="relativer Ablenkwinkel γ/°", 
@@ -312,6 +292,53 @@ plot_data(
     color_seed=78,
     plot=False
 )
+
+# plot the residuals of the data to spline fit
+plot_data(
+    filename="Plots/OPS_2.pdf",
+    datasets=[
+        {
+            "xdata": x,
+            "ydata": y - spline(x),
+            "x_error": [dx] ,
+            "label": "Hg Spektrum Residuen",
+            "marker": ".",
+        },
+        {
+            "xdata": x,
+            "ydata": np.zeros_like(x),
+            "label": "Nulllinie",
+            "marker": "None",
+        },
+        {
+            "xdata": x2,
+            "ydata": spline(x2) - spline(x2),
+            "marker": "*",
+            "x_error": [dx],
+            "label":"Unbekannte Lampe mit λ von Kalibrierkurve"
+        },
+        {
+            "xdata": data["angle_1"],
+            "ydata": data["wavelength_1"] - spline(data["angle_1"]),
+            "marker": "x",
+            "x_error": [dx],
+            "label":"Zn Spektrum"
+        },
+        {
+            "confidence": True,
+            "xdata": angle_smooth,
+            "low_bound": lower_bound - spline(angle_smooth),
+            "high_bound": upper_bound - spline(angle_smooth),
+            "label": "95% Konfidenzintervall",
+            "color": "gray"
+        },
+    ],
+    x_label="relativer Ablenkwinkel γ/°", 
+    y_label="Wellenlänge λ/nm",
+    color_seed=78,
+    plot=False
+)
+
 
 data["spline_wavelength"] = [round(wavelength, 1) for wavelength in spline(data["gamma_2"])]
 
@@ -341,67 +368,30 @@ print_standard_table(
 )
 
 
-
-def sellmeier_eq(wavelength, B1, C1, B2, C2, B3, C3):
-    term1 = (abs(B1) * wavelength**2) / (wavelength**2 - C1)
-    term2 = (abs(B2) * wavelength**2) / (wavelength**2 - C2)
-    term3 = (abs(B3) * wavelength**2) / (wavelength**2 - C3)
-    return np.sqrt(1 + term1 + term2 + term3)
-
-initial_guess = [1.34533359, 0.00997743871, 0.209073176, 0.0470450767, 0.937357162, 111.886764]
-guess =  [0.955092741, -0.0196877842,  0.664587650,  0.04207532650, 29.7501402,  545.866345]
-
-n = [sellmeier_eq(wavelength* 1e-3, *initial_guess) for wavelength in y]
-n_spline = [sellmeier_eq(wavelength* 1e-3, *initial_guess) for wavelength in wavelength_smooth]
-
-a, da, b, db, R2, s2 = main(x, n, [0.02] * len(x))
-
-plot_data(
-    filename="Plots/OPS_2.pdf",
-    datasets=[
-        {
-            "xdata": x,
-            "ydata": n,
-            "x_error": [0.02],
-            "label": "Brechungsindex n",
-            "marker": ".",
-        },
-        {
-            "xdata": x,
-            "ydata": [a + b * x for x in x],
-            "label": "Fit",
-            "marker": "None",
-        },
-        {
-            "xdata": angle_smooth,
-            "ydata": n_spline,
-            "label": "Spline Fit",
-            "marker": "None",
-        }
-    ],
-    x_label="relativer Ablenkwinkel γ/°",
-    y_label="Brechungsindex n",
-    color_seed=43,
-    plot=False
-)
-
-
 data_val_2 = sorted(zip(data["gamma_3"], data["wavelength_3"]))
 x3 = [point[0] for point in data_val_2]
 y3 = [point[1] for point in data_val_2]
 
-n3_0 = [np.sin(np.radians((angle + 60)/2)) / np.sin(np.radians(30)) for angle in x3]
+n3_0 = [ 2* np.sin(np.radians(angle/2 +30)) for angle in x3]
 y3, n3 = zip(*sorted(zip(y3, n3_0)))
 y3 = np.array(y3) * 1e-3
 
 dn_3 = [
-    0.5 * np.cos(np.radians((angle + 60) / 2)) / np.sin(np.radians(30)) * (0.02 * np.pi / 180)
+   np.cos(np.radians(angle/2 +30)) * (dx * np.pi / 180)
     for angle in x3
 ]
 
-spline_3 = UnivariateSpline(y3, n3, s=500, k=4)
-wavelength_smooth_3 = np.linspace(min(y3), max(y3), 500)
+spline_3 = UnivariateSpline(y3, n3, s=600, k=4)
+wavelength_smooth_3 = np.linspace(min(y3), max(y3), 1000)
 n3_spline = [spline_3(wavelength) for wavelength in wavelength_smooth_3]
+
+(median_spline_3, lower_bound, upper_bound, 
+ mean_derivative_3, lower_bound_derivative, upper_bound_derivative,
+ spline_predictions, spline_derivatives) = monte_carlo_spline_uncertainty(
+    y3, n3, y_error=dn_3,
+    spline_kwargs={'s':600, 'k':4}, 
+    n_simulations=1000, x_smooth=wavelength_smooth_3, confidence=95)
+
 
 def refractive_index_polynomial(wavelength, a0=2.5730565, a1=-0.010203605, a2=0.023095784, a3=0.00087114252, a4=-3.0730079e-5, a5=6.9457986e-6):
     n_squared = (
@@ -415,29 +405,101 @@ def refractive_index_polynomial(wavelength, a0=2.5730565, a1=-0.010203605, a2=0.
     n_squared = np.maximum(n_squared, 0)
     return np.sqrt(n_squared)
 
-initial_guess = [1.34533359, 0.00997743871, 0.209073176, 0.0470450767] # 0.937357162, 111.886764
+initial_guess = [1.34533359, 0.00997743871, ] # 0.209073176, 0.0470450767]  0.937357162, 111.886764
 
-def sellmeier_eq(wavelength, B1, C1, B2, C2):
-    term1 = (abs(B1) * wavelength**2) / (wavelength**2 - C1)
-    term2 = (abs(B2) * wavelength**2) / (wavelength**2 - C2)
-    return np.sqrt(1 + term1 + term2 )
+def sellmeier_eq(wavelength, B1, C1):
+    term1 = (B1 * wavelength**2) / (wavelength**2 - C1)
+    return np.sqrt(1 + term1)
 
 
 popt, pcov = curve_fit(sellmeier_eq, y3, n3, p0=initial_guess, sigma=dn_3, absolute_sigma=True)
-print(np.linalg.cond(pcov))
-print(np.diag(pcov))
+n_fit = sellmeier_eq(wavelength_smooth_3, *popt)
 
-print("B1, C1, B2, C2, B3, C3:", popt)
+def dn_dx(x, B, C):
+ return -((B * C * x) / ((C - x**2)**2 * np.sqrt(1 + B + (B * C) / (-C + x**2))))
 
-wavelengths_fit = np.linspace(y3.min(), y3.max(), 200)
-n_fit = sellmeier_eq(wavelengths_fit, *popt)
+def dn_dB(wavelength, B, C):
+    term1 = -C + wavelength**2
+    term2 = 1 + (B * wavelength**2) / term1
+    sqrt_term = np.sqrt(term2)
+    denominator = 2 * term1 * sqrt_term
+    numerator = wavelength**2
+    return numerator / denominator
 
-(mean_spline, lower_bound, upper_bound, 
- mean_derivative, lower_bound_derivative, upper_bound_derivative,
- spline_predictions, spline_derivatives) = monte_carlo_spline_uncertainty(
-    y3, n3, y_error=dn_3,
-    spline_kwargs={'s':100, 'k':4}, 
-    n_simulations=1000, x_smooth=wavelength_smooth_3, confidence=95)
+def dn_dC(wavelength, B, C):
+    term1 = -C + wavelength**2
+    term2 = 1 + (B * wavelength**2) / term1
+    sqrt_term = np.sqrt(term2)
+    denominator = 2 * (term1)**2 * sqrt_term
+    numerator = B * wavelength**2
+    return numerator / denominator
+
+def ddn_dx_dC(x, B, C):
+    return (B*x*(-B*C * x**2 - 2*(B + 1)*x**4 + 2*C**2))/(2*(C - x**2)**4 * ((B*C)/(x**2 - C) + B + 1)**(3/2))
+
+def ddn_dx_dB(x, B, C):
+    return (C*x*(-2*C + (2 + B)*x**2))/(2*(C - x**2)**3*(1 + B + (B*C)/(-C + x**2))**(3/2))
+
+
+
+dn3_sellmeier = np.sqrt( dn_dB(wavelength_smooth_3, *popt)**2 * pcov[0, 0] + dn_dC(wavelength_smooth_3, *popt)**2 * pcov[1, 1] + 2 * dn_dC(wavelength_smooth_3, *popt)*dn_dB(wavelength_smooth_3, *popt) * pcov[0, 1] )
+
+dn_dx_values = dn_dx(wavelength_smooth_3, *popt)
+
+def dn_dx_error(wavelength):
+ return np.sqrt(
+        (ddn_dx_dB(wavelength, *popt) ** 2) * pcov[0, 0] +
+        (ddn_dx_dC(wavelength, *popt) ** 2) * pcov[1, 1] +
+        2 * ddn_dx_dB(wavelength, *popt) * ddn_dx_dC(wavelength, *popt) * pcov[0, 1]
+    )
+
+
+perr = np.sqrt(np.diag(pcov))
+print(pcov)
+print("B1, C1:", popt)
+print("Errors ΔB1, ΔC1:", perr)
+
+def find_closest(wavelength):
+    return np.argmin(np.abs(wavelength - wavelength_smooth_3))
+
+
+
+
+def compute_derivative_at_point(f, x0, initial_h=0.2, N=50, params=None, max_iterations=10, tolerance=1e-6, h_min=1e-10, yerr=None):
+    h = initial_h
+    prev_slope = None
+    for i in range(max_iterations):
+        xdata = np.linspace(x0 - h, x0 + h, N)
+        if params is None:
+            ydata = f(xdata)
+        else:
+            ydata = f(xdata, *params)
+        
+        if yerr is not None:
+            yerr = yerr[find_closest(x0) - 1:find_closest(x0) + 2]
+
+        try:
+            a, da, b, db, R2 = slope(xdata, ydata, yerr)
+        except ValueError as e:
+            print(f"Iteration {i}: {e}")
+            break
+
+        if prev_slope is not None:
+            if abs(b - prev_slope) < tolerance * abs(prev_slope):
+                break
+        prev_slope = b
+        h = h / 2
+        if h < h_min:
+            break
+    return (a, da), (b, db)
+
+
+
+a_spline_579, b_spline_579 = compute_derivative_at_point(spline_3, 0.5791, initial_h=0.1, N=100, max_iterations=50, tolerance=1e-6, h_min=1e-10)
+a_spline_577, b_spline_577 = compute_derivative_at_point(spline_3, 0.577, initial_h=0.1, N=100, max_iterations=50, tolerance=1e-6, h_min=1e-10)
+a_sellmeier_577, b_sellmeier_577 = compute_derivative_at_point(sellmeier_eq, 0.577, params=popt, initial_h=0.1, N=100, max_iterations=50, tolerance=1e-6, h_min=1e-10)
+a_sellmeier_579, b_sellmeier_579 = compute_derivative_at_point(sellmeier_eq, 0.5791, params=popt, initial_h=0.1, N=100, max_iterations=50, tolerance=1e-6, h_min=1e-10)
+
 
 
 
@@ -445,39 +507,72 @@ plot_data(
     filename="Plots/OPS_4.pdf",
     datasets=[
         {
-            "xdata": y3,
-            "ydata": n3,
-            "y_error": dn_3,
-            "label": "n(λ)",
-            "marker": ".",
-            "line": "None",
-        },
-        {
             "xdata": wavelength_smooth_3,
             "ydata": n3_spline,
             "label": "Spline Fit",
             "marker": "None",
+            "color_group": "1",
         },
         {
             "confidence": True,
             "xdata": wavelength_smooth_3,
             "low_bound": lower_bound,
             "high_bound": upper_bound,
-            "label": "95% Konfidenzintervall",
+            "label": "95% Konfidenzintervall Spline",
+            "color_group": "1",
         },
         {
-            "xdata": wavelengths_fit,
+            "confidence": True,
+            "xdata": wavelength_smooth_3,
+            "low_bound": n_fit - 2 * dn3_sellmeier,
+            "high_bound": n_fit + 2 * dn3_sellmeier,
+            "label": "95% Konfidenzintervall Sellmeier",
+            "color_group": "2",
+        },
+        {
+            "xdata": wavelength_smooth_3,
             "ydata": n_fit,
             "label": "Sellmeier Fit",
             "marker": "None",
+            "color_group": "2",
         },
-        #{
-        #    "xdata": wavelengths_fit,
-        #    "ydata": refractive_index_polynomial(wavelengths_fit),
-        #    "label": "Sellmeier Fit 2",
-        #    "marker": "None",
-        #}
-
+        {
+            "xdata": y3,
+            "ydata": n3,
+            "y_error": dn_3,
+            "label": "n(λ)",
+            "marker": ".",
+            "line": "None",
+            "color_group": "3"
+        },
+        {
+            "xdata":wavelength_smooth_3,
+            "ydata":b_spline_579[0]*wavelength_smooth_3 + a_spline_579[0],
+            "marker":"None",
+            "line": "--",
+            "color_group": "1",
+        },
+        {
+            "xdata":wavelength_smooth_3,
+            "ydata":b_spline_577[0]*wavelength_smooth_3 + a_spline_577[0],
+            "marker":"None",
+            "line": "--",
+            "color_group": "1",
+        },
+        {
+            "xdata":wavelength_smooth_3,
+            "ydata":b_sellmeier_577[0]*wavelength_smooth_3 + a_sellmeier_577[0],
+            "marker":"None",
+            "line": "--",
+            "color_group": "2",
+        },
+        {
+            "xdata":wavelength_smooth_3,
+            "ydata":b_sellmeier_579[0]*wavelength_smooth_3 + a_sellmeier_579[0],
+            "marker":"None",
+            "line": "--",
+            "color_group": "2",
+        },
     ],
     x_label="Wellenlänge λ/µm",
     y_label="Brechungsindex n",
@@ -485,20 +580,15 @@ plot_data(
     plot=False
 )
 
-def sellmeier_derivative(wavelength, B1, C1, B2, C2):
-    n = sellmeier_eq(wavelength, B1, C1, B2, C2)
-    term1 = (B1 * wavelength * C1) / (wavelength**2 - C1)**2
-    term2 = (B2 * wavelength * C2) / (wavelength**2 - C2)**2
-    dn_dlambda = -1 / n * (term1 + term2 )
-    return dn_dlambda
+
 
 data["n"], data["dn"], data["n_pow"] = map(list, zip(*(round_val(n, dn) for n, dn in zip(n3[::-1], dn_3[::-1]))))
 
 data["wavelength_3"] = apply_color_to_text(data["wavelength_3"], data["wavelength_3"])
 
 headers_3 = {
-    "angle_3": {"label": "{Position(°)}", "precision": 2},      
-    "gamma_3": {"label": "{rel.Pos. $\\gamma$(°)}", "precision": 2},
+    "angle_3": {"label": "{Position(°)}", "precision": 2, "err": [0.01]*len(data["angle_3"])},      
+    "gamma_3": {"label": "{rel.Pos. $\\gamma$(°)}", "precision": 2, "err": [dx]*len(data["gamma_3"])},
     "n": {"label": "{n $\\pm \\Delta n$}", "precision": data["n_pow"], "err": data["dn"]},                 
     "wavelength_3": {"label": "{$\\lambda$(nm)}"}
 }
@@ -506,55 +596,89 @@ headers_3 = {
 print_standard_table(
     data=data,
     headers=headers_3,
-    column_formats= ["3.2", "3.2", "1.4", "1.4", "2.1"],
-    caption="Messaufnahme des Hg Spektrum wobei alle Winkeln die minimale Ablenkung für jede Wellenlänge im Prisma darstellen.",
+    column_formats= ["3.2", "3.2", "1.4", "1.4"],
+    caption="Messwerte des Hg-Spektrums, wobei alle Winkel die minimale Ablenkung für jede Wellenlänge im Prisma darstellen.",
     label="tab:HgMinima",
-    show=False
+    show=True
 )
 
-spline_derivative = spline_3.derivative()
 
-dn_dlambda_spline_577 = spline_derivative(577 * 1e-3)
-dn_dlambda_spline_579 = spline_derivative(579.1 * 1e-3)
-dn_dlambda_577 = sellmeier_derivative(577*1e-3, *popt)
-dn_dlambda_579 = sellmeier_derivative(579*1e-3, *popt)
+
+def find_closest(wavelength):
+    return np.argmin(np.abs(wavelength - wavelength_smooth_3))
+
+dn_dlambda_spline_577_1 = mean_derivative_3[find_closest(577 * 1e-3)]
+dn_dlambda_spline_579_1 = mean_derivative_3[find_closest(579.1 * 1e-3)]
+dn_dlambda_577_1 = dn_dx(577*1e-3, *popt)
+dn_dlambda_579_1 = dn_dx(579*1e-3, *popt)
+
+low_bound_n = [dn_dx(wavelength, *popt) for wavelength in wavelength_smooth_3] - 2 * dn_dx_error(wavelength_smooth_3)
+high_bound_n = [dn_dx(wavelength, *popt) for wavelength in wavelength_smooth_3] + 2 * dn_dx_error(wavelength_smooth_3)
+
+
+
+def find_ddn_dx_spline(wavelength):
+    low_der = lower_bound_derivative[find_closest(wavelength)] - dn_dlambda_spline_577_1
+    up_der = upper_bound_derivative[find_closest(wavelength)] - dn_dlambda_spline_579_1
+    return low_der, up_der
+
+dn_dlambda_577, ddn_dlambda_577, _ = round_val( dn_dlambda_577_1, err= 2 * dn_dx_error(0.577) ,intermed=False)
+dn_dlambda_579, ddn_dlambda_579, _ = round_val( dn_dlambda_579_1, err = 2* dn_dx_error(0.5791) ,intermed=False)
+
+dn_dlambda_spline_577, ddn_dlambda_spline_577, _ = round_val( float(dn_dlambda_spline_577_1), err = (abs(find_ddn_dx_spline(0.577)[0]) + abs(find_ddn_dx_spline(0.577)[1])) / 2, intermed=False)
+dn_dlambda_spline_579, ddn_dlambda_spline_579, _ = round_val( float(dn_dlambda_spline_579_1), err = (abs(find_ddn_dx_spline(0.5791)[0]) + abs(find_ddn_dx_spline(0.5791)[1])) / 2, intermed=False)
 
 plot_data(
     filename="Plots/OPS_5.pdf",
     datasets=[
         {
             "xdata":wavelength_smooth_3,
-            "ydata":spline_derivative(wavelength_smooth_3),
+            "ydata":mean_derivative_3,
             "label":"Ableitung Spline Fit",
             "marker":"None",
+            "color_group": "1",
         },
         {
             "confidence": True,
             "xdata": wavelength_smooth_3,
             "low_bound": lower_bound_derivative,
             "high_bound": upper_bound_derivative,
-            "label": "95% Konfidenzintervall",
+            "label": "95% Konfidenzintervall Spline",
+            "color_group": "1",
+        },
+        {
+            "ydata": [dn_dlambda_spline_577_1, dn_dlambda_spline_579_1],
+            "xdata": [0.577, 0.5791],
+            "y_error": [(abs(find_ddn_dx_spline(0.577)[0]) + abs(find_ddn_dx_spline(0.577)[1]))/2, (abs(find_ddn_dx_spline(0.5791)[0]) + abs(find_ddn_dx_spline(0.5791)[1]))/2],
+            "marker":".",
+            "line":"None",
+            "label":"Ableitung Spline Fit an 577nm und 579nm",
+            "color_group": "1",
         },
         {
             "xdata":wavelength_smooth_3,
-            "ydata":[sellmeier_derivative(wavelength, *popt) for wavelength in wavelength_smooth_3],
+            "ydata":[dn_dx(wavelength, *popt) for wavelength in wavelength_smooth_3],
             "label":"Ableitung Sellmeier Fit",
             "marker":"None",
+            "color_group": "2",
         },
         {
-            "ydata": [dn_dlambda_577, dn_dlambda_579],
-            "xdata": [0.577, 0.5791],
-            "line":"None",
-            "marker":"x",
-            "label":"Ableitung Sellmeier Fit an 577nm und 579nm"
+            "confidence": True,
+            "xdata": wavelength_smooth_3,
+            "low_bound": low_bound_n,
+            "high_bound": high_bound_n,
+            "label": "95% Konfidenzintervall",
+            "color_group": "2",
         },
         {
-            "ydata": [dn_dlambda_spline_577, dn_dlambda_spline_579],
+            "ydata": [dn_dlambda_577_1, dn_dlambda_579_1],
             "xdata": [0.577, 0.5791],
-            "marker":"x",
+            "y_error": [2 * dn_dx_error(0.577), 2 * dn_dx_error(0.5791)],
             "line":"None",
-            "label":"Ableitung Spline Fit an 577nm und 579nm"
-        }
+            "marker":".",
+            "label":"Ableitung Sellmeier Fit an 577nm und 579nm",
+            "color_group": "2",
+        },
     ],
     x_label="Wellenlänge λ/µm",
     y_label="dn/dλ",
@@ -562,11 +686,15 @@ plot_data(
     plot=False
 )
 
+#with tangents at 577nm and 579nm
+print("tanget at 577nm and 579nm")
+print(f"dn/dλ (577 nm): {round_val(b_sellmeier_577[0],b_sellmeier_577[1], intermed=False)[0]} \\pm {round_val(b_sellmeier_577[0],b_sellmeier_577[1], intermed=False)[1]}| dn/dλ (577 nm) spline: {round_val(b_spline_577[0],b_spline_577[1], intermed=False)[0]} \\pm {round_val(b_spline_577[0],b_spline_577[1], intermed=False)[1]}" )
+print(f"dn/dλ (579 nm): {round_val(b_sellmeier_579[0],b_sellmeier_579[1], intermed=False)[0]} \\pm {round_val(b_sellmeier_579[0],b_sellmeier_579[1], intermed=False)[1]}| dn/dλ (579 nm) spline: {round_val(b_spline_579[0],b_spline_579[1], intermed=False)[0]} \\pm {round_val(b_spline_579[0],b_spline_579[1], intermed=False)[1]}" )
 
 
-
-print(f"dn/dλ at 577 nm: {round_val( dn_dlambda_577, intermed=True)[0]} | dn/dλ at 577 nm spline: {round_val( float(dn_dlambda_spline_577), intermed=True)[0]}" )
-print(f"dn/dλ at 579 nm: {round_val( dn_dlambda_579, intermed=True)[0]} | dn/dλ at 579 nm spline: {round_val( float(dn_dlambda_spline_579), intermed=True)[0]}" )
+print("derivatives at 577nm and 579nm")
+print(f"dn/dλ (577 nm): {dn_dlambda_577} \\pm {ddn_dlambda_577}| dn/dλ (577 nm) spline: {dn_dlambda_spline_577} \\pm {ddn_dlambda_spline_577}" )
+print(f"dn/dλ (579 nm): {dn_dlambda_579} \\pm {ddn_dlambda_579}| dn/dλ (579 nm) spline: {dn_dlambda_spline_579} \\pm {ddn_dlambda_spline_579}" )
 
 
 resolve_theo = 0.5 * (577 + 579.1) / (579.1 - 577)

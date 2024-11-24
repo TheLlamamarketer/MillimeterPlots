@@ -28,30 +28,67 @@ def round_val(val, err=0, intermed=True):
         return round(val, power), err_round, power
 
 
-def support(xdata, ydata, yerr):  # Support function for main
-    x2 = sum((x**2) / (dy**2) for x, dy in zip(xdata, yerr))
-    x = sum(x / (dy**2) for x, dy in zip(xdata, yerr))
-    y = sum(y / (dy**2) for y, dy in zip(ydata, yerr))
-    xy = sum((x * y) / (dy**2) for x, y, dy in zip(xdata, ydata, yerr))
-    one = sum(1 / (dy**2) for dy in yerr)
+def support(xdata, ydata, yerr=None):
+    if yerr is None:
+        # Unweighted sums
+        n = len(xdata)
+        Sx = np.sum(xdata)
+        Sy = np.sum(ydata)
+        Sxx = np.sum(xdata * xdata)
+        Sxy = np.sum(xdata * ydata)
+        Sw = n  
+    else:
+        if np.any(yerr == 0):
+            raise ValueError("Zero error encountered in yerr. Cannot perform weighted regression with zero errors.")
+        weights = 1.0 / (yerr ** 2)
+        Sx = np.sum(weights * xdata)
+        Sy = np.sum(weights * ydata)
+        Sxx = np.sum(weights * xdata * xdata)
+        Sxy = np.sum(weights * xdata * ydata)
+        Sw = np.sum(weights)
+    return Sx, Sxx, Sy, Sxy, Sw
 
-    return x, x2, y, xy, one
+def slope(xdata, ydata, yerr=None):
+    Sx, Sxx, Sy, Sxy, Sw = support(xdata, ydata, yerr)
+    denominator = Sw * Sxx - Sx ** 2
+    if denominator == 0:
+        raise ValueError("Denominator is zero; cannot compute slope and intercept.")
 
-def main(xdata, ydata, yerr):
+    b = (Sw * Sxy - Sx * Sy) / denominator
+    a = (Sxx * Sy - Sx * Sxy) / denominator
 
-    (x, x2, y, xy, one) = support(xdata, ydata, yerr)  
-    S = one * x2 - x**2  # determinant of the matrix
-    a = (x2 * y - x * xy) / S 
-    b = (one * xy - x * y) / S 
-    da = np.sqrt(x2 / S)  
-    db = np.sqrt(one / S)  
+    # Calculate errors in slope and intercept
+    if yerr is None:
+        # Unweighted case
+        n = len(xdata)
+        residuals = ydata - (a + b * xdata)
+        variance = np.sum(residuals ** 2) / (n - 2)
+        sb = np.sqrt(variance * Sw / denominator)
+        sa = np.sqrt(variance * Sxx / denominator)
+    else:
+        # Weighted case
+        weights = 1.0 / (yerr ** 2)
+        residuals = ydata - (a + b * xdata)
+        variance = np.sum(weights * residuals ** 2) / (Sw - 2)
+        sb = np.sqrt(variance * Sw / denominator)
+        sa = np.sqrt(variance * Sxx / denominator)
 
-    zähler = sum(((y - a - b * x) / dy) ** 2 for x, y, dy in zip(xdata, ydata, yerr))  # Sum over deviation from fit
-    nenner = sum(((y - y / one) / dy) ** 2 for y, dy in zip(ydata, yerr))  # Sum over deviation from mean value y/one
-    R2 = (1 - zähler / nenner) * 100  #  R^2
-    s2 = zähler / (len(xdata) - 2)  #  s^2
+    # Coefficient of determination R^2
+    if yerr is None:
+        y_mean = np.mean(ydata)
+        total_variance = np.sum((ydata - y_mean) ** 2)
+        explained_variance = np.sum((a + b * xdata - y_mean) ** 2)
+    else:
+        y_mean = np.sum(weights * ydata) / Sw
+        total_variance = np.sum(weights * (ydata - y_mean) ** 2)
+        explained_variance = np.sum(weights * (a + b * xdata - y_mean) ** 2)
 
-    return a, da, b, db, R2, s2
+    if total_variance == 0:
+        R2 = 1.0
+    else:
+        R2 = explained_variance / total_variance
+
+    return a, sa, b, sb, R2
 
 
 def print_result(a, b, da, db, R2, s2):

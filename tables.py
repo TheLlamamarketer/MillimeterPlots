@@ -23,7 +23,7 @@ def dec(value, max_precision=9, fixed_precision=None):
 
 def print_standard_table(
     data,
-    headers,  # Use headers directly, now keyed by data keys
+    headers,  
     header_groups=None,
     caption=None,
     label=None,
