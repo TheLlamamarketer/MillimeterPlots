@@ -48,15 +48,30 @@ def print_standard_table(
 
     num_columns = len(headers)
 
-    # Create layout for tabular environment based on column-specific formats if provided
+    # Get the column keys in order
+    column_keys = list(headers.keys())
+
+    layout_parts = []
     if column_formats:
-        layout = "|".join([f"S[table-format={fmt}]" for fmt in column_formats])
+        for key, fmt in zip(column_keys, column_formats):
+            entry = headers[key]
+            dark = entry.get("dark", False)
+            col_format = f"S[table-format={fmt}]"
+            if dark:
+                col_format = f">{{\\columncolor{{black!20}}}}{col_format}"
+            layout_parts.append(col_format)
     else:
-        layout = (
-            "|".join([f"S[{si_setup}]" for _ in range(num_columns)])
-            if si_setup
-            else "|".join(["c" for _ in range(num_columns)])
-        )
+        for key in column_keys:
+            entry = headers[key]
+            dark = entry.get("dark", False)
+            if si_setup:
+                col_format = f"S[{si_setup}]"
+            else:
+                col_format = "c"
+            if dark:
+                col_format = f">{{\\columncolor{{black!20}}}}{col_format}"
+            layout_parts.append(col_format)
+    layout = "|".join(layout_parts)
     layout = f"| {layout} |"
 
     # Print LaTeX table preamble

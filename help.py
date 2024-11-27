@@ -88,7 +88,8 @@ def slope(xdata, ydata, yerr=None):
     else:
         R2 = explained_variance / total_variance
 
-    return a, sa, b, sb, R2
+
+    return a, sa, b, sb, R2, variance
 
 
 def print_result(a, b, da, db, R2, s2):

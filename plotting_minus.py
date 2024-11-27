@@ -75,7 +75,7 @@ def colors_from_groups(datasets, color_seed=None):
 
 
 
-def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='best', color_seed=203, width=20, height=28, plot=True):
+def plot_data(filename, datasets, title=None, x_label=None, y_label=None, legend_position='best', color_seed=203, width=20, height=28, plot=True):
     fig, ax = plt.subplots(figsize=(width/2.54, height/2.54))
 
     # Generate colors for datasets based on color groups or unique identifiers 
@@ -101,6 +101,9 @@ def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='b
                 color = colors[color_group]
             else:
                 color = colors[id(data)]
+        
+        if xdata is None and ydata is None:
+            continue
 
         ax.grid(True, which='major')
         ax.grid(True, which='minor', color='#EEEEEE', linestyle=':', linewidth=0.5)
@@ -108,13 +111,13 @@ def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='b
 
 
         if confidence:
-            ax.fill_between(xdata, low_bound, high_bound, color=color, alpha=0.5, label=label, clip_on=False, zorder=2 )
+            ax.fill_between(xdata, low_bound, high_bound, color=color, alpha=0.5, label=label, zorder=2 )
         elif y_error is None and x_error is None:
-            ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line, clip_on=False, label=label,  markersize=10)
+            ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line, label=label,  markersize=10)
         else:
             ax.errorbar(xdata, ydata, color=color, marker=marker, linestyle='none', 
                     yerr=y_error, xerr=x_error, capsize=4, elinewidth=1, 
-                    capthick=1, clip_on=False, label=label, markersize=10)
+                    capthick=1, label=label, markersize=10)
 
     # Add legend if labels are provided
     handles, labels = ax.get_legend_handles_labels()
@@ -125,6 +128,8 @@ def plot_data(filename, datasets, x_label=None, y_label=None, legend_position='b
         plt.xlabel(x_label)
     if y_label:
         plt.ylabel(y_label)
+    if title:
+        plt.title(title)
 
     plt.tight_layout()
     plt.savefig(filename, format='pdf')
