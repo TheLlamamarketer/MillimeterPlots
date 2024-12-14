@@ -1,12 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from lmfit import Model, conf_interval
 
 
 def FirstSignificant(x):
     if x == 0:
         return 0
     return -int(np.floor(np.log10(abs(x))))
-
 
 def round_val(val, err=0, intermed=True):
     if val == 0:
@@ -90,6 +91,79 @@ def slope(xdata, ydata, yerr=None):
 
 
     return a, sa, b, sb, R2, variance
+
+
+
+
+def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
+    """
+    Parameters:
+    - xdata: Independent variable data.
+    - ydata: Dependent variable data.
+    - yerr: Uncertainties in ydata (optional).
+    - model: "linear" or "quadratic" (default is "linear").
+    - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
+    
+    Returns:
+    - result: ModelResult object containing fit results.
+    """
+
+    if model == "linear":
+        def model_func(x, a, b): return a + b * x
+    elif model == "quadratic":
+        def model_func(x, a, b, c): return a + b * x + c * x ** 2
+    else:
+        raise ValueError(f"Unsupported model: {model}")
+    model = Model(model_func)
+    
+    params = model.make_params(a=0, b=1, c=1)
+    if constraints:
+        for param, value in constraints.items():
+            if value is not None:
+                params[param].set(value=value, vary=False) 
+
+    if yerr is not None: result = model.fit(ydata, params, x=xdata, weights= 1.0 / yerr)
+    else: result = model.fit(ydata, params, x=xdata)
+
+    return result
+
+def calc_CI(result, xdata, sigmas=[1, 2, 3]):
+    """
+    Calculate confidence intervals for the fit using eval_uncertainty.
+    Returns:
+    - ci_dict: Dictionary with keys as sigma levels and values as tuples of (lower, upper) bounds for the fit curve.
+    """
+    ci_dict = {}
+    try:
+        for sigma in sigmas:
+            # Calculate uncertainty at the given sigma level
+            uncertainty = result.eval_uncertainty(sigma=sigma, x=xdata)
+            best_fit = result.eval(x=xdata)
+
+            lower = best_fit - uncertainty
+            upper = best_fit + uncertainty
+
+            ci_dict[sigma] = (lower, upper)
+    except Exception as e:
+        print(f"Error calculating confidence intervals: {e}")
+        for sigma in sigmas:
+            ci_dict[sigma] = (np.full_like(xdata, np.nan), np.full_like(xdata, np.nan))
+    return ci_dict
+
+def extract_params(result):
+    params_dict = {}
+    for param in result.params:
+        value = result.params[param].value
+        stderr = result.params[param].stderr
+        params_dict[param] = (value, stderr)
+    return params_dict
+
+def calc_R2(result):
+    return result.rsquared
+
+
+
+
 
 
 def print_result(a, b, da, db, R2, s2):
