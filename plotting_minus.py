@@ -126,6 +126,7 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         confidence = data.get('confidence', {})
         fit = data.get('fit', None)
         color_group = data.get('color_group')
+        high_res_x = data.get('high_res_x', None)
 
         color = data.get('color')
         if color is None:
@@ -138,14 +139,14 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
             for i, (lower, upper) in enumerate(confidence):
                 if lower is not None and upper is not None:
                     ax.fill_between(
-                        xdata, lower, upper, interpolate=True,
+                        high_res_x if high_res_x is not None else xdata, lower, upper, interpolate=True,
                         facecolor=color, edgecolor=None, alpha=0.4 - (i * 0.1),
                         label=f"{label} CI ({i+1}σ)" if label else None, zorder=2
                     )
 
         if fit is not None:
             try:
-                ax.plot(xdata, fit, color=color, linestyle=line_fit, linewidth=1,
+                ax.plot(high_res_x if high_res_x is not None else xdata, fit, color=color, linestyle=line_fit, linewidth=1,
                         label=f"{label} Fit" if label else None, zorder=5)
             except Exception as e:
                 print(f"Error in fit for dataset '{label}': {e}")

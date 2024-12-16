@@ -96,6 +96,9 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
     - model: "linear" or "quadratic" (default is "linear").
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
     """
+    # Ensure yerr is iterable
+    if yerr is not None and not hasattr(yerr, '__len__'):
+        yerr = np.array([yerr])
 
     if model == "linear":
         def model_func(x, a, b): return a + b * x
@@ -111,7 +114,7 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
             if value is not None:
                 params[param].set(value=value, vary=False) 
 
-    if yerr is not None: result = model.fit(ydata, params, x=xdata, weights= 1.0 / yerr)
+    if yerr is not None: result = model.fit(ydata, params, x=xdata, weights= 1.0 / yerr**2)
     else: result = model.fit(ydata, params, x=xdata)
 
     return result
