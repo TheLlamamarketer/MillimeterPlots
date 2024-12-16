@@ -126,22 +126,27 @@ plot_data(
     plot=False,
 )
 
-
-lambdas = [data['lambda1'], data['lambda2'], data['lambda3'], data['lambda4'], data['lambda5']]
+# Convert 'lambdas' and 'dlambda' to NumPy arrays
+lambdas = np.array([data['lambda1'], data['lambda2'], data['lambda3'], data['lambda4'], data['lambda5']])
+dlambda = np.full_like(lambdas, data['dlambda'])
 
 datasets = []
-max_length = max(len(data['G1']), len(data['G2']), len(data['G3']), len(data['G4']), len(data['G5']))
+max_length = max([len(data[f'G{i}']) for i in range(1, 6)])
 
 for i in range(max_length):
-    xdata = []
-    ydata = []
-    yerr = []
-    for G_key, lambda_value in zip(['G1', 'G2', 'G3', 'G4', 'G5'], lambdas):
+    xdata_list = []
+    ydata_list = []
+    yerr_list = []
+    for idx, G_key in enumerate(['G1', 'G2', 'G3', 'G4', 'G5']):
         G_values = data[G_key]
         if len(G_values) > i:
-            ydata.append(G_values[i])
-            xdata.append(lambda_value)
-            yerr.append(data[f'd{G_key}'][i])
+            ydata_list.append(G_values[i])
+            xdata_list.append(lambdas[idx])
+            yerr_list.append(data[f'd{G_key}'][i])
+
+    xdata = np.array(xdata_list)
+    ydata = np.array(ydata_list)
+    yerr = np.array(yerr_list)
 
     datasets.append({
         'xdata': xdata,
@@ -161,33 +166,29 @@ plot_data(
     height=10,
     plot=False,
 )
-# Calculate xy and dxy
-xy = [np.array(dataset['ydata']) * np.array(dataset['xdata']) for dataset in datasets]
-dxy = [xy[i] * np.sqrt((np.array(datasets[i]['y_error']) / np.array(datasets[i]['ydata']))**2 + (data['dlambda']/ np.array(datasets[i]['xdata']))**2) for i in range(len(datasets))]
+# Ensure 'xy' and 'dxy' are NumPy arrays
+xy = [datasets[i]['xdata'] * datasets[i]['ydata']/(1+2*i) for i in range(len(datasets))]
+dxy = [xy[i] * np.sqrt(
+    (datasets[i]['y_error'] / datasets[i]['ydata'])**2 +
+    (dlambda / datasets[i]['xdata'])**2) for i in range(len(datasets))]
 
 # Fit the data for each dataset
 fits = []
+plot_datasets = []
 for i in range(len(datasets)):
-    result = linear_fit(np.array(datasets[i]['xdata']), xy[i], dxy[i], model="linear")
-    fits.append(result)
+    result = linear_fit(np.arange(len(datasets[i]['xdata'])), xy[i], dxy[i], model="linear")
 
-# Print fit reports
-for i, result in enumerate(fits):
     params = extract_params(result)
     b, db = params['b']
     b, db, _ = round_val(b, db)
     s2 = result.redchi  
     print(f"Slope (b_{i+1}) = {b} ± {db}. R^2 = {calc_R2(result)}. s^2 = {s2}")
 
-
-# Prepare datasets for plotting
-plot_datasets = []
-for i in range(len(datasets)):
-    high_res_x = np.linspace(np.min(datasets[i]['xdata']), np.max(datasets[i]['xdata']), 300)
-    fit = fits[i].eval(x=high_res_x)
-    confidence = calc_CI(fits[i], high_res_x)
+    high_res_x = np.linspace(0, len(datasets[i]['xdata']) - 1, 300)
+    fit = result.eval(x=high_res_x)
+    confidence = calc_CI(result, high_res_x, sigmas=[1])
     plot_datasets.append({
-        'xdata': datasets[i]['xdata'],
+        'xdata': np.arange(len(datasets[i]['xdata'])),
         'ydata': xy[i],
         'y_error': dxy[i],
         'label': f'Dataset {i+1}',
@@ -222,10 +223,10 @@ for i in range(max_length):
 
     lx = np.log(xdata)
     ly = np.log(ydata)
-    ldy_up = np.log(np.array(ydata) + np.array(yerr)) - np.log(ydata)
-    ldy_low = np.log(ydata) - np.log(np.array(ydata) - np.array(yerr))
-    ldy = np.average([ldy_up, ldy_low], axis=0)
-    
+    ldy_up = np.log(ydata + yerr) - ly
+    ldy_low = ly - np.log(ydata - yerr)
+    ldy = yerr / ydata  
+
     result = linear_fit(lx, ly, ldy, model="linear")
     high_res_x = np.linspace(lx.min(), lx.max(), 300)
     fit = result.eval(x=high_res_x)
@@ -234,8 +235,8 @@ for i in range(max_length):
     params.append(param)
 
     datasets2.append({
-        'xdata': np.log(xdata),
-        'ydata': np.log(ydata),
+        'xdata': lx,
+        'ydata': ly,
         'y_error': (ldy_low, ldy_up),
         'fit': fit,
         'line': 'None',
@@ -244,26 +245,25 @@ for i in range(max_length):
         'high_res_x': high_res_x
     })
 
-
-
-
 # Calculate the averages of x, y, and yerrors from before and add them to the datasets
 log_xdata_avg = np.log(lambdas)
-ydata_log_avg = np.mean([dataset['ydata'] for dataset in datasets2 if dataset['ydata'] is not None], axis=0)
-yerr_log_lower_avg = np.mean([dataset['y_error'][0] for dataset in datasets2 if dataset['y_error'] is not None], axis=0)
-yerr_log_upper_avg = np.mean([dataset['y_error'][1] for dataset in datasets2 if dataset['y_error'] is not None], axis=0)
-yerr_log_avg = (yerr_log_lower_avg + yerr_log_upper_avg) / 2
+all_ydata = np.array([dataset['ydata'] for dataset in datasets2])
+ydata_log_avg = np.mean(all_ydata, axis=0)
+all_yerr_low = np.array([dataset['y_error'][0] for dataset in datasets2])
+all_yerr_up = np.array([dataset['y_error'][1] for dataset in datasets2])
+yerr_log_avg_low = np.sqrt(np.sum(all_yerr_low**2, axis=0)) / all_yerr_low.shape[0]
+yerr_log_avg_up = np.sqrt(np.sum(all_yerr_up**2, axis=0)) / all_yerr_up.shape[0]
+yerr_log_avg = (yerr_log_avg_low + yerr_log_avg_up) / 2
 result_avg = linear_fit(log_xdata_avg, ydata_log_avg, yerr_log_avg, model="linear")
 high_res_x_avg = np.linspace(log_xdata_avg.min(), log_xdata_avg.max(), 300)
 fit_avg = result_avg.eval(x=high_res_x_avg)
 confidence_avg = calc_CI(result_avg, high_res_x_avg)
 params_avg = extract_params(result_avg)
 
-
 datasets2.append({
     'xdata': log_xdata_avg,
     'ydata': ydata_log_avg,
-    'y_error': (yerr_log_lower_avg, yerr_log_upper_avg),
+    'y_error': (yerr_log_avg_low, yerr_log_avg_up),
     'fit': fit_avg,
     'line': 'None',
     'marker': 'x',
@@ -314,11 +314,11 @@ b_avg, db_avg, _ = round_val(b_avg, db_avg, intermed=False)
 
 print(f"Weighted average of b values: {b_avg} ± {db_avg}")
 b, db = params_avg['b']
-b, db, _ = round_val(b, db)
+b, db, _ = round_val(b, db, intermed=False)
 print(f"Average of b values after log: {b} ± {db}")
 
 b, db = log_params_avg['b']
-b, db, _ = round_val(b, db)
+b, db, _ = round_val(b, db, intermed=False)
 print(f"Average of b values before log: {b} ± {db}")
 
 plot_data(
