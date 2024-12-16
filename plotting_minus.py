@@ -117,7 +117,6 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         xdata = np.array(data.get('xdata', []), dtype=float)
         ydata = np.array(data.get('ydata', []), dtype=float)
 
-
         y_error = data.get('y_error')
         x_error = data.get('x_error')
         label = data.get('label')
@@ -135,25 +134,18 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         if xdata.size == 0 or ydata.size == 0:
             continue
 
-
-
-        x_smooth = np.linspace(min(xdata), max(xdata), 300)
         if confidence:
-            # Expecting confidence dict to have keys 1, 2, 3 for σ levels
-            for i, sigma in enumerate([1, 2, 3]):
-                if sigma in confidence:
-                    lower, upper = confidence[sigma]
+            for i, (lower, upper) in enumerate(confidence):
+                if lower is not None and upper is not None:
                     ax.fill_between(
-                        x_smooth, lower, upper, interpolate = True,
+                        xdata, lower, upper, interpolate=True,
                         facecolor=color, edgecolor=None, alpha=0.4 - (i * 0.1),
-                        label=f"{label} CI ({sigma}σ)" if label else None, zorder=2
+                        label=f"{label} CI ({i+1}σ)" if label else None, zorder=2
                     )
 
         if fit is not None:
             try:
-                x_smooth = np.linspace(min(xdata), max(xdata), 300)
-                y_fit = fit(x_smooth)
-                ax.plot(x_smooth, y_fit, color=color, linestyle=line_fit, linewidth=1,
+                ax.plot(xdata, fit, color=color, linestyle=line_fit, linewidth=1,
                         label=f"{label} Fit" if label else None, zorder=5)
             except Exception as e:
                 print(f"Error in fit for dataset '{label}': {e}")
@@ -163,9 +155,21 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
             ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line,
                     label=label, markersize=10, alpha=0.9, zorder=4)
         else:
+            if isinstance(y_error, tuple) and len(y_error) == 2:
+                yerr_lower, yerr_upper = y_error
+            else:
+                yerr_lower = y_error
+                yerr_upper = y_error
+
+            if isinstance(x_error, tuple) and len(x_error) == 2:
+                xerr_lower, xerr_upper = x_error
+            else:
+                xerr_lower = x_error
+                xerr_upper = x_error
+
             ax.errorbar(
-                xdata, ydata, yerr=np.abs(y_error) if y_error is not None else None,
-                xerr=np.abs(x_error) if x_error is not None else None,
+                xdata, ydata, yerr=[np.abs(yerr_lower), np.abs(yerr_upper)] if y_error is not None else None,
+                xerr=[np.abs(xerr_lower), np.abs(xerr_upper)] if x_error is not None else None,
                 fmt=marker, color=color, linestyle='none',
                 capsize=2, elinewidth=0.5, capthick=0.5,
                 label=label, markersize=5, alpha=0.9, zorder=4

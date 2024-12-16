@@ -92,7 +92,7 @@ datasets = [
         "fit": lambda x: params0_sensor['a'][0] + params0_sensor['b'][0] * x,
         "line_fit": "-",
     }
-]
+] 
 
 plot_data(
     filename="Plots/POL_0.pdf",

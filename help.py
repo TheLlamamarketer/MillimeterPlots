@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-from lmfit import Model, conf_interval
-
+from lmfit import Model
 
 def FirstSignificant(x):
     if x == 0:
@@ -27,7 +26,6 @@ def round_val(val, err=0, intermed=True):
         power = FirstSignificant(err_round)
         if intermed: power += 1
         return round(val, power), err_round, power
-
 
 def support(xdata, ydata, yerr=None):
     if yerr is None:
@@ -92,20 +90,11 @@ def slope(xdata, ydata, yerr=None):
 
     return a, sa, b, sb, R2, variance
 
-
-
-
 def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
     """
     Parameters:
-    - xdata: Independent variable data.
-    - ydata: Dependent variable data.
-    - yerr: Uncertainties in ydata (optional).
     - model: "linear" or "quadratic" (default is "linear").
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
-    
-    Returns:
-    - result: ModelResult object containing fit results.
     """
 
     if model == "linear":
@@ -127,13 +116,13 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
 
     return result
 
-def calc_CI(result, xdata, sigmas=[1, 2, 3]):
+def calc_CI(result, xdata, sigmas=[1, 2]):
     """
     Calculate confidence intervals for the fit using eval_uncertainty.
     Returns:
-    - ci_dict: Dictionary with keys as sigma levels and values as tuples of (lower, upper) bounds for the fit curve.
+    - ci_list: List of tuples with (lower, upper) bounds for the fit curve at different sigma levels.
     """
-    ci_dict = {}
+    ci_list = []
     try:
         for sigma in sigmas:
             # Calculate uncertainty at the given sigma level
@@ -143,12 +132,13 @@ def calc_CI(result, xdata, sigmas=[1, 2, 3]):
             lower = best_fit - uncertainty
             upper = best_fit + uncertainty
 
-            ci_dict[sigma] = (lower, upper)
+            ci_list.append((lower, upper))
     except Exception as e:
-        print(f"Error calculating confidence intervals: {e}")
+        import logging
+        logging.error(f"Error calculating confidence intervals: {e}")
         for sigma in sigmas:
-            ci_dict[sigma] = (np.full_like(xdata, np.nan), np.full_like(xdata, np.nan))
-    return ci_dict
+            ci_list.append((np.full_like(xdata, np.nan), np.full_like(xdata, np.nan)))
+    return ci_list
 
 def extract_params(result):
     params_dict = {}
@@ -161,11 +151,6 @@ def extract_params(result):
 def calc_R2(result):
     return result.rsquared
 
-
-
-
-
-
 def print_result(a, b, da, db, R2, s2):
     print(f"Steigung {{b}} = {b} \u00B1 {db}")
     if a != 0 and da != 0:
@@ -173,7 +158,6 @@ def print_result(a, b, da, db, R2, s2):
     print(f"Bestimmtheitsmaß {{R^2}} = {R2}")
     print(f"Varianz {{s^2}} = {s2}")
     print()
-
 
 def plot(x, y, dy, a, b, da, db, xlabel="x", ylabel="y", title=None):
     plt.errorbar(x, y, yerr=dy, fmt="kx", capsize=6, capthick=1, label="Datenpunkte")  
