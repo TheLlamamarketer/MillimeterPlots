@@ -1,130 +1,51 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import cv2
 from plotting_minus import plot_data
-from lmfit import Model
 from help import *
-from scipy.stats import f as f_dist
 
-
-# Load the image in grayscale
-file = 'G3'
-img = cv2.imread(f'FOU_data/{file}.png', cv2.IMREAD_UNCHANGED)
-print(img.shape, img.dtype, img.min(), img.max())
-
-red_chan = img[:,:,2]
-cmap_yell = plt.cm.colors.LinearSegmentedColormap.from_list('custom_yellow', ['black', 'yellow'], N=256)
-
-
-green_chan = img[:,:,1]
-arrow_mask = (green_chan > 50) & (red_chan > 50)
-
-green_working = green_chan.astype(float)
-green_working[arrow_mask] = np.nan
-
-slices = []
-range_slices = (0, 1280)
-
-slices = []
-for i in range(range_slices[0], range_slices[1]):
-    vertical_slice = green_working[:, i]
-    normalized_slice = vertical_slice / 255.0 
-    slices.append(normalized_slice)
-
-average_slice = np.nanmean(slices, axis=0)
-std_slice = np.nanstd(slices, axis=0)
-
-t_data = np.arange(len(average_slice))
-
-# readd old autocorrelation
-
-def autocorrelation(x):
-    results = []
-    for k in range(0, len(x)):
-        result = np.sum(x[k:] * x[:len(x)-k])/np.sqrt(np.sum(x[k:]**2) * np.sum(x[:len(x)-k]**2))
-        results.append(result)
-    return np.array(results)
-
-def find_extrema(x):
-    maxima = [0]
-    minima = []
-    for i in range(1, len(x) - 1):
-        if x[i] > x[i - 1] and x[i] > x[i + 1]:
-            maxima.append(i)
-        if x[i] < x[i - 1] and x[i] < x[i + 1]:
-            minima.append(i)
-    return maxima, minima
-
-autocor_res = autocorrelation(average_slice)
-maxima, minima = find_extrema(autocor_res)
-
-print(f"Distances between maxima: {np.diff(maxima)}")
-print(f"Distances between minima: {np.diff(minima)}")
-
+#data = {
+#    'G5':[7.5, 22.5, 37, 50.5, 64],
+#    'dG5':[1, 2, 2, 3, 3],
+#    'lambda5': 65.35714286,
+#    'G4':[5.5, 15.5, 26.5, 36, 47],
+#    'dG4':[1, 2, 1.5, 2.5, 2.5],
+#    'lambda4': 92.55,
+#    'G3':[4, 11.5, 19, 26, 33.5],
+#    'dG3':[0.75, 1, 1.5, 2, 2.5],
+#    'lambda3': 130.5,
+#    'G2':[3, 8, 14, 18.5, 24],# 29, 34],
+#    'dG2':[0.5, 2, 1, 2, 1.5],# 2, 2],
+#    'lambda2': 185,
+#    'G1':[2, 6, 9, 13, 16.5],# 20.5, 24.5, 28],
+#    'dG1':[0.5, 0.5, 1.5, 1.5, 2],# 1.5, 2, 2],
+#    'lambda1': 261,
+#    'dlambda': 0.5
+#}
+#
+#for key in data:
+#    if isinstance(data[key], list):
+#        data[key] = np.array(data[key])
+#        data[key] = data[key]/2
 
 data = {
-    'G5':[7.5, 22.5, 37, 50.5, 64],
-    'dG5':[1, 2, 2, 3, 3],
+    'G5': [3.75, 11.25, 18.5, 25.25, 32],
+    'dG5': [0.5, 1, 1, 1.5, 1.5],
     'lambda5': 65.35714286,
-    'G4':[5.5, 15.5, 26.5, 36, 47],
-    'dG4':[1, 2, 1.5, 2.5, 2.5],
+    'G4': [2.75, 7.75, 13.25, 18, 23.5],
+    'dG4': [0.5, 1, 0.75, 1.25, 1.25],
     'lambda4': 92.55,
-    'G3':[4, 11.5, 19, 26, 33.5],
-    'dG3':[0.75, 1, 1.5, 2, 2.5],
+    'G3': [2, 5.75, 9.5, 13, 16.75],
+    'dG3': [0.375, 0.5, 0.75, 1, 1.25],
     'lambda3': 130.5,
-    'G2':[3, 8, 14, 18.5, 24],# 29, 34],
-    'dG2':[0.5, 2, 1, 2, 1.5],# 2, 2],
+    'G2': [1.5, 4, 7, 9.25, 12],
+    'dG2': [0.25, 1, 0.5, 1, 0.75],
     'lambda2': 185,
-    'G1':[2, 6, 9, 13, 16.5],# 20.5, 24.5, 28],
-    'dG1':[0.5, 0.5, 1.5, 1.5, 2],# 1.5, 2, 2],
+    'G1': [1, 3, 4.5, 6.5, 8.25],
+    'dG1': [0.25, 0.25, 0.75, 0.75, 1],
     'lambda1': 261,
     'dlambda': 0.5
 }
 
-for key in data:
-    if isinstance(data[key], list):
-        data[key] = np.array(data[key])
-        data[key] = data[key]/2
 
-
-plot_data(
-    datasets=[
-        {
-            'xdata': t_data,
-            'ydata': average_slice,
-            'label': 'Intensity Profile',
-            'line': '-',
-            'marker': None,
-            'confidence': [(average_slice - std_slice , average_slice + std_slice), (average_slice - 2*std_slice, average_slice + 2*std_slice)]
-        },
-    ],
-    x_label='Pixel Row',
-    y_label='Intensity',
-    title='Intensity Profile with Error Bounds',
-    filename=f'Plots/FOU_{file}.pdf',
-    width=25,
-    height=10,
-    plot=False,
-)
-
-plot_data(
-    datasets=[
-        {
-            'xdata': t_data,
-            'ydata': autocor_res,
-            'label': 'Autocorrelation',
-            'line': '-',
-            'marker': None,
-        },
-    ],
-    x_label='Pixel Row',
-    y_label='Autocorrelation',
-    title='Autocorrelation of Intensity Profile',
-    filename=f'Plots/FOU_{file}_autocorrelation.pdf',
-    width=25,
-    height=10,
-    plot=False,
-)
 
 # Convert 'lambdas' and 'dlambda' to NumPy arrays
 lambdas = np.array([data['lambda1'], data['lambda2'], data['lambda3'], data['lambda4'], data['lambda5']])
@@ -140,9 +61,9 @@ for i in range(max_length):
     for idx, G_key in enumerate(['G1', 'G2', 'G3', 'G4', 'G5']):
         G_values = data[G_key]
         if len(G_values) > i:
-            ydata_list.append(G_values[i])
+            ydata_list.append(G_values[i]/(2*i+1))
             xdata_list.append(lambdas[idx])
-            yerr_list.append(data[f'd{G_key}'][i])
+            yerr_list.append(data[f'd{G_key}'][i]/(2*i+1))
 
     xdata = np.array(xdata_list)
     ydata = np.array(ydata_list)
@@ -163,7 +84,7 @@ plot_data(
     title='Grating frequency vs grating spacing',
     filename='Plots/FOU_data1.pdf',
     width=25,
-    height=10,
+    height=25,
     plot=False,
 )
 # Ensure 'xy' and 'dxy' are NumPy arrays
@@ -245,33 +166,8 @@ for i in range(max_length):
         'high_res_x': high_res_x
     })
 
-# Calculate the averages of x, y, and yerrors from before and add them to the datasets
+
 log_xdata_avg = np.log(lambdas)
-all_ydata = np.array([dataset['ydata'] for dataset in datasets2])
-ydata_log_avg = np.mean(all_ydata, axis=0)
-all_yerr_low = np.array([dataset['y_error'][0] for dataset in datasets2])
-all_yerr_up = np.array([dataset['y_error'][1] for dataset in datasets2])
-yerr_log_avg_low = np.sqrt(np.sum(all_yerr_low**2, axis=0)) / all_yerr_low.shape[0]
-yerr_log_avg_up = np.sqrt(np.sum(all_yerr_up**2, axis=0)) / all_yerr_up.shape[0]
-yerr_log_avg = (yerr_log_avg_low + yerr_log_avg_up) / 2
-result_avg = linear_fit(log_xdata_avg, ydata_log_avg, yerr_log_avg, model="linear")
-high_res_x_avg = np.linspace(log_xdata_avg.min(), log_xdata_avg.max(), 300)
-fit_avg = result_avg.eval(x=high_res_x_avg)
-confidence_avg = calc_CI(result_avg, high_res_x_avg)
-params_avg = extract_params(result_avg)
-
-datasets2.append({
-    'xdata': log_xdata_avg,
-    'ydata': ydata_log_avg,
-    'y_error': (yerr_log_avg_low, yerr_log_avg_up),
-    'fit': fit_avg,
-    'line': 'None',
-    'marker': 'x',
-    'label': 'Average after log',
-    'confidence': confidence_avg,
-    'high_res_x': high_res_x_avg
-})
-
 ydata_avg = np.mean([dataset['ydata'] for dataset in datasets if dataset['ydata'] is not None], axis=0)
 all_y_errors = np.array([np.array(dataset['y_error']) for dataset in datasets if dataset['y_error'] is not None])
 yerr_avg = np.sqrt(np.sum(all_y_errors**2, axis=0)) / all_y_errors.shape[0]
@@ -303,19 +199,17 @@ b_values = []
 db_values = []
 for param in params:
     b, db, _ = round_val(param['b'][0], param['b'][1])
+    a, da, _ = round_val(param['a'][0], param['a'][1])
     if db >= 10e-5:    
         b_values.append(param['b'][0])
         db_values.append(param['b'][1])
-        print(f"Steigung b = {b} ± {db}")
+        print(f"Steigung b = {b} ± {db}. Achsenabschnitt a = {a} ± {da}")
 
 b_avg = np.average(b_values, weights=np.reciprocal(np.array(db_values) ** 2))
 db_avg = 1 / np.sqrt(np.sum(np.reciprocal(np.array(db_values) ** 2)))
 b_avg, db_avg, _ = round_val(b_avg, db_avg, intermed=False)
 
 print(f"Weighted average of b values: {b_avg} ± {db_avg}")
-b, db = params_avg['b']
-b, db, _ = round_val(b, db, intermed=False)
-print(f"Average of b values after log: {b} ± {db}")
 
 b, db = log_params_avg['b']
 b, db, _ = round_val(b, db, intermed=False)
@@ -328,17 +222,6 @@ plot_data(
     title='Log-Log Plot of Grating frequency vs grating spacing',
     filename='Plots/FOU_data2.pdf',
     width=25,
-    height=10,
+    height=25,
     plot=True,
 )
-
-
-
-plt.figure(figsize=(img.shape[1] / 100, img.shape[0] / 100), dpi=100)
-cmap = plt.cm.colors.LinearSegmentedColormap.from_list('custom_green', ['black', 'green', 'lime'], N=256)
-plt.imshow(red_chan, cmap=cmap_yell)
-plt.imshow(green_working, cmap=cmap)
-plt.axis('off')
-plt.gca().set_position([0, 0, 1, 1])  
-plt.savefig(f'FOU_data2/{file}.png', bbox_inches='tight', pad_inches=0, format='png', dpi=100) 
-#plt.show()
