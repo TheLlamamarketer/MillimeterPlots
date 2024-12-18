@@ -2,22 +2,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 from plotting_minus import plot_data
-from lmfit import Model
 from help import *
-from scipy.stats import f as f_dist
 
 
 # Load the image in grayscale
 files = ['0', '1', '3', '5', '7', '9', '11', '100000']
-files2 = ['G5', 'G4', 'G3', 'G2', 'G1']
+files2 = ['G1', 'G2', 'G3', 'G4', 'G5_2']
 files3 = ['a3_G1', 'a3_G2', 'a3_G3', 'a3_G4', 'a3_G5']
 
 files0 = ['1']
 
-for file in files3:
+for file in files2:
     img = cv2.imread(f'FOU_data/{file}.png', cv2.IMREAD_UNCHANGED)
     if file == '100000':
         file_name = '\\infty'
+    elif '_2' in file:
+        file_name = file[:-2]
+    elif 'a3' in file:
+        file_name = file[3:]
     else:
         file_name = file
 
@@ -47,14 +49,13 @@ for file in files3:
 
     t_data = np.arange(len(average_slice))
 
-    # readd old autocorrelation
-
     def autocorrelation(x):
-        results = []
-        for k in range(0, len(x)):
-            result = np.sum(x[k:] * x[:len(x)-k])/np.sqrt(np.sum(x[k:]**2) * np.sum(x[:len(x)-k]**2))
-            results.append(result)
-        return np.array(results)
+        n = len(x)
+        x = x - np.mean(x)
+        #result = np.correlate(x, x, mode='full')
+        #return result[result.size // 2:] / (np.var(x) * np.arange(n, 0, -1))
+        result = np.array([np.sum(x[:n-k] * x[k:]) for k in range(n)]) / np.sum(x ** 2)
+        return result
 
     def find_extrema(x):
         maxima = [0]
@@ -77,39 +78,39 @@ for file in files3:
             {
                 'xdata': t_data,
                 'ydata': average_slice,
-                'label': 'Intensity Profile',
+                'label': 'Gitter ' + file_name,
                 'line': '-',
                 'marker': None,
                 'confidence': [(average_slice - std_slice , average_slice + std_slice), (average_slice - 2*std_slice, average_slice + 2*std_slice)]
             },
         ],
-        x_label='Pixel Row',
-        y_label='Intensity',
-        title=f'Intensitätsprofil mit Beugunsordnung {file_name}',
+        x_label='Pixel Spalte',
+        y_label='Summe der Intensitäten',
+        title=f'Intensitätsprofil mit Gitter {file_name}',
         filename=f'Plots/FOU_{file}.pdf',
+        width=25,
+        height=12,
+        plot=False,
+    )
+
+    plot_data(
+        datasets=[
+            {
+                'xdata': t_data,
+                'ydata': autocor_res,
+                'label': 'Autokorrelation',
+                'line': '-',
+                'marker': None,
+            },
+        ],
+        x_label='Verzögerung',
+        y_label='Autokorrelation',
+        title='Autokorrelation des Intensitätsprofils',
+        filename=f'Plots/FOU_{file}_autocorrelation.pdf',
         width=25,
         height=10,
         plot=False,
     )
-
-    #plot_data(
-    #    datasets=[
-    #        {
-    #            'xdata': t_data,
-    #            'ydata': autocor_res,
-    #            'label': 'Autocorrelation',
-    #            'line': '-',
-    #            'marker': None,
-    #        },
-    #    ],
-    #    x_label='Pixel Row',
-    #    y_label='Autocorrelation',
-    #    title='Autocorrelation of Intensity Profile',
-    #    filename=f'Plots/FOU_{file}_autocorrelation.pdf',
-    #    width=25,
-    #    height=10,
-    #    plot=False,
-    #)
 
 
 
@@ -131,8 +132,9 @@ import matplotlib.pyplot as plt
 t = np.linspace(0, 8*np.pi, 1000)
 orders = [0, 1, 3, 5, 7, 11, 99] 
 
-# Create subplots
-fig, axes = plt.subplots(len(orders), 1, figsize=(8, 12))
+
+# Create subplots with adjusted figure size
+fig, axes = plt.subplots(len(orders), 1, figsize=(8, 12), constrained_layout=True)
 
 for idx, N in enumerate(orders):
     # Initialize the square wave approximation
@@ -146,7 +148,10 @@ for idx, N in enumerate(orders):
     axes[idx].grid(True)
     axes[idx].legend(loc='upper right')
 
-plt.tight_layout()
-plt.savefig('Plots/Square.pdf')
-plt.show()
+axes[-1].set_xlabel('Time')  # Add x-axis label to the last subplot
+
+# Remove plt.tight_layout() if using constrained_layout
+# plt.tight_layout()
+plt.savefig('Plots/Square.pdf', format='pdf', bbox_inches='tight')
+plt.close()
 

@@ -61,9 +61,9 @@ for i in range(max_length):
     for idx, G_key in enumerate(['G1', 'G2', 'G3', 'G4', 'G5']):
         G_values = data[G_key]
         if len(G_values) > i:
-            ydata_list.append(G_values[i]/(2*i+1))
+            ydata_list.append(G_values[i])
             xdata_list.append(lambdas[idx])
-            yerr_list.append(data[f'd{G_key}'][i]/(2*i+1))
+            yerr_list.append(data[f'd{G_key}'][i])
 
     xdata = np.array(xdata_list)
     ydata = np.array(ydata_list)
@@ -73,22 +73,25 @@ for i in range(max_length):
         'xdata': xdata,
         'ydata': ydata,
         'y_error': yerr,
+        'x_error': dlambda,
+        'label': f'Beugungsordnung {2*i+1}',
         'line': 'None',
         'marker': '.'
     })
 
 plot_data(
     datasets=datasets,
-    x_label='grating spacing',
-    y_label='Grating frequency',
-    title='Grating frequency vs grating spacing',
+    x_label='Gitterperiode \\Lambda/pixel',
+    y_label='Gitterfrequenz k/mm',
+    title='Gitterfrequenz in Abhängigkeit der Gitterperiode',
     filename='Plots/FOU_data1.pdf',
     width=25,
     height=25,
     plot=False,
 )
+
 # Ensure 'xy' and 'dxy' are NumPy arrays
-xy = [datasets[i]['xdata'] * datasets[i]['ydata']/(1+2*i) for i in range(len(datasets))]
+xy = [datasets[i]['xdata'] * datasets[i]['ydata']/(2*i+1) for i in range(len(datasets))]
 dxy = [xy[i] * np.sqrt(
     (datasets[i]['y_error'] / datasets[i]['ydata'])**2 +
     (dlambda / datasets[i]['xdata'])**2) for i in range(len(datasets))]
@@ -112,7 +115,7 @@ for i in range(len(datasets)):
         'xdata': np.arange(len(datasets[i]['xdata'])),
         'ydata': xy[i],
         'y_error': dxy[i],
-        'label': f'Dataset {i+1}',
+        'label': f'Beugungsordnung {2*i+1}',
         'line': 'None',
         'marker': 'o',
         'fit': fit,
@@ -124,8 +127,8 @@ for i in range(len(datasets)):
 plot_data(
     datasets=plot_datasets,
     x_label='index',
-    y_label='Product of Grating frequency and spacing (xy)',
-    title='Antiproportionality of Grating frequency and spacing',
+    y_label='Gitterfrequenz * Gitterperiode / (2n+1)',
+    title='Gitterfrequenz * Gitterperiode / (2n+1) in Abhängigkeit der Beugungsordnung',
     filename='Plots/FOU_xy_plot.pdf',
     width=25,
     height=25,
@@ -141,11 +144,14 @@ for i in range(max_length):
     xdata = datasets[i]['xdata']
     ydata = datasets[i]['ydata']
     yerr = datasets[i]['y_error']
+    xerr = datasets[i]['x_error']
 
     lx = np.log(xdata)
     ly = np.log(ydata)
     ldy_up = np.log(ydata + yerr) - ly
     ldy_low = ly - np.log(ydata - yerr)
+    ldx_up = np.log(xdata + xerr) - lx
+    ldx_low = lx - np.log(xdata - xerr)
     ldy = yerr / ydata  
 
     result = linear_fit(lx, ly, ldy, model="linear")
@@ -159,15 +165,23 @@ for i in range(max_length):
         'xdata': lx,
         'ydata': ly,
         'y_error': (ldy_low, ldy_up),
+        'x_error': (ldx_low, ldx_up),
+        'label': f'Beugungsordnung {2*i+1}',
         'fit': fit,
+        'fit_label': False,
         'line': 'None',
         'marker': '.',
         'confidence': confidence,
+        'confidence_label': False,
         'high_res_x': high_res_x
     })
 
 
 log_xdata_avg = np.log(lambdas)
+log_xerr_avg_up = np.log(lambdas + dlambda) - log_xdata_avg
+log_xerr_avg_low = log_xdata_avg - np.log(lambdas - dlambda)
+log_xerr_avg = np.average([log_xerr_avg_up, log_xerr_avg_low], axis=0)
+
 ydata_avg = np.mean([dataset['ydata'] for dataset in datasets if dataset['ydata'] is not None], axis=0)
 all_y_errors = np.array([np.array(dataset['y_error']) for dataset in datasets if dataset['y_error'] is not None])
 yerr_avg = np.sqrt(np.sum(all_y_errors**2, axis=0)) / all_y_errors.shape[0]
@@ -186,11 +200,14 @@ datasets2.append({
     'xdata': log_xdata_avg,
     'ydata': log_ydata_avg,
     'y_error': (log_yerr_avg_low, log_yerr_avg_up),
+    'x_error': (log_xerr_avg_low, log_xerr_avg_up),
     'fit': log_fit_avg,
+    'fit_label': False,
     'line': 'None',
     'marker': 'x',
-    'label': 'Average before log',
+    'label': 'Mittelwert vor Logarithmierung',
     'confidence': log_confidence_avg,
+    'confidence_label': False,
     'high_res_x': log_high_res_x_avg
 })
 
@@ -209,19 +226,20 @@ b_avg = np.average(b_values, weights=np.reciprocal(np.array(db_values) ** 2))
 db_avg = 1 / np.sqrt(np.sum(np.reciprocal(np.array(db_values) ** 2)))
 b_avg, db_avg, _ = round_val(b_avg, db_avg, intermed=False)
 
-print(f"Weighted average of b values: {b_avg} ± {db_avg}")
+print(f"Geewichteter Mittelwert der Steigung b = {b_avg} ± {db_avg}")
 
 b, db = log_params_avg['b']
 b, db, _ = round_val(b, db, intermed=False)
-print(f"Average of b values before log: {b} ± {db}")
+print(f"Steigung mit Mittelung vor Logarithmierung b = {b} ± {db}. R^2 = {calc_R2(log_result_avg)}. s^2 = {log_result_avg.redchi}")
 
 plot_data(
     datasets=datasets2,
-    x_label='Log of grating spacing',
-    y_label='Log of Grating frequency',
-    title='Log-Log Plot of Grating frequency vs grating spacing',
+    x_label='ln(Gitterperiode)/ln(pixel)',
+    y_label='ln(Gitterfrequenz)/ln(mm)',
+    title='ln(Gitterfrequenz) in Abhängigkeit von ln(Gitterperiode)',
     filename='Plots/FOU_data2.pdf',
-    width=25,
-    height=25,
+    width=20,
+    height=28,
+    color_seed=123,
     plot=True,
 )

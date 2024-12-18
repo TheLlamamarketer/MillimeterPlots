@@ -103,7 +103,8 @@ def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF'):
 def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
               legend_position='best', color_seed=203, width=20, height=28,
               plot=True, ymax=None, ymin=None, xmax=None, xmin=None, bg_hex='#FFFFFF'):
-    fig, ax = plt.subplots(figsize=(width/2.54, height/2.54))
+    # Create figure with specified size and constrained layout
+    fig, ax = plt.subplots(figsize=(width/2.54, height/2.54), constrained_layout=True)
 
     # Generate colors for datasets based on color groups or unique identifiers 
     colors = colors_from_groups(datasets, color_seed=color_seed, bg_hex=bg_hex)
@@ -124,7 +125,9 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         line = data.get('line', '-')
         line_fit = data.get('line_fit', '-')
         confidence = data.get('confidence', {})
+        confidence_label = data.get('confidence_label', True)
         fit = data.get('fit', None)
+        fit_label = data.get('fit_label', True)
         color_group = data.get('color_group')
         high_res_x = data.get('high_res_x', None)
 
@@ -141,13 +144,13 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
                     ax.fill_between(
                         high_res_x if high_res_x is not None else xdata, lower, upper, interpolate=True,
                         facecolor=color, edgecolor=None, alpha=0.4 - (i * 0.1),
-                        label=f"{label} CI ({i+1}σ)" if label else None, zorder=2
+                        label=f"{label} CI ({i+1}σ)" if label and confidence_label else None, zorder=2
                     )
 
         if fit is not None:
             try:
                 ax.plot(high_res_x if high_res_x is not None else xdata, fit, color=color, linestyle=line_fit, linewidth=1,
-                        label=f"{label} Fit" if label else None, zorder=5)
+                        label=f"{label} Fit" if label and fit_label else None, zorder=3)
             except Exception as e:
                 print(f"Error in fit for dataset '{label}': {e}")
                 continue
@@ -187,8 +190,8 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
     ax.set_ylim(bottom=ymin, top=ymax)
     ax.set_xlim(left=xmin, right=xmax)
 
-    plt.tight_layout()
-    plt.savefig(filename, format='pdf')
+    # Save the figure including all elements
+    plt.savefig(filename, format='pdf', bbox_inches='tight')
 
     if plot:
         plt.show()
