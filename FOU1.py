@@ -115,13 +115,13 @@ for file in files:
 
 
 
-    plt.figure(figsize=(img.shape[1] / 100, img.shape[0] / 100), dpi=100)
+    plt.figure(figsize=(img.shape[1] / 100, img.shape[0] / 100), dpi=60)  # Decreased dpi for lower quality
     cmap = plt.cm.colors.LinearSegmentedColormap.from_list('custom_green', ['black', 'green', 'lime'], N=256)
     plt.imshow(red_chan, cmap=cmap_yell)
     plt.imshow(green_working, cmap=cmap)
     plt.axis('off')
     plt.gca().set_position([0, 0, 1, 1])  
-    plt.savefig(f'FOU_data2/{file}.png', bbox_inches='tight', pad_inches=0, format='png', dpi=100) 
+    plt.savefig(f'FOU_data2/{file}.png', bbox_inches='tight', pad_inches=0, format='png', dpi=60)  # Decreased dpi for lower quality
     #plt.show()
     plt.close()
 
