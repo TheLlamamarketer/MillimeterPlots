@@ -1,6 +1,12 @@
+from matplotlib.pylab import f
 import numpy as np
 from plotting_minus import plot_data
+from tables import *
 from help import *
+
+
+print()
+
 
 #data = {
 #    'G5':[7.5, 22.5, 37, 50.5, 64],
@@ -51,6 +57,30 @@ data = {
 lambdas = np.array([data['lambda1'], data['lambda2'], data['lambda3'], data['lambda4'], data['lambda5']])
 dlambda = np.full_like(lambdas, data['dlambda'])
 
+# Prepare the data for the table
+gitter_list = ['G1', 'G2', 'G3', 'G4', 'G5']
+
+orders = [2 * i + 1 for i in range(len(data['G1']))] 
+
+# Define headers
+headers = {'Gitter': {'label': '{{Gitter}}', 'data': gitter_list}}
+for i, order in enumerate(orders):
+    headers[f'G{i+1}'] = {'label': f'{{$k_{{{order}}}$ (mm)}}', 'err': [data[f'dG{j}'][i] for j in range(1, 6)], 'data': [data[f'G{j}'][i] for j in range(1, 6)], 'intermed': True}
+
+headers['lambda'] = {'label': '{{$\\Lambda$ (pixel)}}', 'err': data['dlambda'], 'intermed': True, 'data': lambdas}
+
+
+# Print the table with the updated headers
+print_standard_table(
+    data=data,
+    headers=headers,
+    caption='Messwerte der Gitterfrequenz $k_{{n}} = n\\cdot\\Delta k$ und Gitterperiode $\\Lambda$.  $k$ Werte wurden schon gemittelt (also einfach /2)',
+    label='tab:1',
+    column_formats=["l"] + ["2.2"] * (len(headers) - 1),
+    show=True,
+)
+
+
 datasets = []
 max_length = max([len(data[f'G{i}']) for i in range(1, 6)])
 
@@ -58,7 +88,7 @@ for i in range(max_length):
     xdata_list = []
     ydata_list = []
     yerr_list = []
-    for idx, G_key in enumerate(['G1', 'G2', 'G3', 'G4', 'G5']):
+    for idx, G_key in enumerate(gitter_list):
         G_values = data[G_key]
         if len(G_values) > i:
             ydata_list.append(G_values[i])
@@ -81,8 +111,8 @@ for i in range(max_length):
 
 plot_data(
     datasets=datasets,
-    x_label='Gitterperiode \\Lambda/pixel',
-    y_label='Gitterfrequenz k/mm',
+    x_label='Gitterperiode $\\Lambda$/pixel',
+    y_label='Gitterfrequenz $k/mm$',
     title='Gitterfrequenz in Abhängigkeit der Gitterperiode',
     filename='Plots/FOU_data1.pdf',
     width=25,
@@ -92,7 +122,7 @@ plot_data(
 
 # Ensure 'xy' and 'dxy' are NumPy arrays
 xy = [datasets[i]['xdata'] * datasets[i]['ydata']/(2*i+1) for i in range(len(datasets))]
-dxy = [xy[i] * np.sqrt(
+dxy = [abs(xy[i]) * np.sqrt(
     (datasets[i]['y_error'] / datasets[i]['ydata'])**2 +
     (dlambda / datasets[i]['xdata'])**2) for i in range(len(datasets))]
 
@@ -106,13 +136,13 @@ for i in range(len(datasets)):
     b, db = params['b']
     b, db, _ = round_val(b, db)
     s2 = result.redchi  
-    print(f"Slope (b_{i+1}) = {b} ± {db}. R^2 = {calc_R2(result)}. s^2 = {s2}")
+    print(f"b_{2*i+1} = ({b} \\pm {db}) pixel\\cdot mm. R_{2*i+1}^2 = {calc_R2(result):.4f}; \\quad")
 
     high_res_x = np.linspace(0, len(datasets[i]['xdata']) - 1, 300)
     fit = result.eval(x=high_res_x)
     confidence = calc_CI(result, high_res_x, sigmas=[1])
     plot_datasets.append({
-        'xdata': np.arange(len(datasets[i]['xdata'])),
+        'xdata': np.array(gitter_list),
         'ydata': xy[i],
         'y_error': dxy[i],
         'label': f'Beugungsordnung {2*i+1}',
@@ -126,18 +156,20 @@ for i in range(len(datasets)):
 # Plot the data and the fits using plot_data
 plot_data(
     datasets=plot_datasets,
-    x_label='index',
-    y_label='Gitterfrequenz * Gitterperiode / (2n+1)',
-    title='Gitterfrequenz * Gitterperiode / (2n+1) in Abhängigkeit der Beugungsordnung',
+    x_label='Gitter',
+    y_label='Gitterfrequenz * Gitterperiode / Ordnung',
+    title='Gitterfrequenz * Gitterperiode / Ordnung in Abhängigkeit der Beugungsordnung',
     filename='Plots/FOU_xy_plot.pdf',
     width=25,
     height=25,
-    plot=True,
+    plot=False,
 )
 
 
 datasets2 = []
 params = []
+results = []
+stuffs = []
 max_length = max(len(data['G1']), len(data['G2']), len(data['G3']), len(data['G4']), len(data['G5']))
 
 for i in range(max_length):
@@ -158,9 +190,10 @@ for i in range(max_length):
     high_res_x = np.linspace(lx.min(), lx.max(), 300)
     fit = result.eval(x=high_res_x)
     confidence = calc_CI(result, high_res_x)
-    param = extract_params(result)
-    params.append(param)
+    params.append(extract_params(result))
+    results.append(result)
 
+    stuffs.append(slope(lx, ly, ldy))
     datasets2.append({
         'xdata': lx,
         'ydata': ly,
@@ -214,23 +247,33 @@ datasets2.append({
 
 b_values = []
 db_values = []
-for param in params:
+print("_" * 100)
+for i, param in enumerate(params):
     b, db, _ = round_val(param['b'][0], param['b'][1])
     a, da, _ = round_val(param['a'][0], param['a'][1])
     if db >= 10e-5:    
         b_values.append(param['b'][0])
         db_values.append(param['b'][1])
-        print(f"Steigung b = {b} ± {db}. Achsenabschnitt a = {a} ± {da}")
+        print(f"b_{2*i+1} = ({b} \\pm {db}) \\ln(pixel)/ \\ln(mm). R^2 = {calc_R2(results[i]):.4f}; \\quad")
 
 b_avg = np.average(b_values, weights=np.reciprocal(np.array(db_values) ** 2))
 db_avg = 1 / np.sqrt(np.sum(np.reciprocal(np.array(db_values) ** 2)))
 b_avg, db_avg, _ = round_val(b_avg, db_avg, intermed=False)
 
-print(f"Geewichteter Mittelwert der Steigung b = {b_avg} ± {db_avg}")
+print(f"\\bar{{b}}_{{gewichtet}} = ({b_avg} \\pm {db_avg}) \\ln(pixel)/ \\ln(mm)")
 
 b, db = log_params_avg['b']
 b, db, _ = round_val(b, db, intermed=False)
-print(f"Steigung mit Mittelung vor Logarithmierung b = {b} ± {db}. R^2 = {calc_R2(log_result_avg)}. s^2 = {log_result_avg.redchi}")
+print(f"\\bar{{b}}{{gemittelt}} = {b} ± {db} \\ln(pixel)/ \\ln(mm). R^2 = {calc_R2(log_result_avg):.4f}")
+
+
+b_slope = []
+db_slope = []
+for stuff in stuffs:
+    b_slope.append(stuff[2])
+    db_slope.append(stuff[3])
+    b, db, _ = round_val(stuff[2], stuff[3])
+    print(f"Steigung b = {b} ± {db}. R^2 = {stuff[4]}. s^2 = {stuff[5]}")
 
 plot_data(
     datasets=datasets2,
@@ -241,5 +284,5 @@ plot_data(
     width=20,
     height=28,
     color_seed=123,
-    plot=True,
+    plot=False,
 )

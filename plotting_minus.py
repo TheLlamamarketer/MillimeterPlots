@@ -115,8 +115,15 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
 
     # Plot each dataset
     for data in datasets:
-        xdata = np.array(data.get('xdata', []), dtype=float)
+        xdata = data.get('xdata', [])
         ydata = np.array(data.get('ydata', []), dtype=float)
+
+        if isinstance(xdata[0], str):
+            xdata = np.array(range(len(xdata)))
+            ax.set_xticks(xdata)
+            ax.set_xticklabels(data.get('xdata', []))
+        else:
+            xdata = np.array(xdata, dtype=float)
 
         y_error = data.get('y_error')
         x_error = data.get('x_error')

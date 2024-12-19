@@ -1,3 +1,4 @@
+from matplotlib.pylab import f
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
@@ -12,7 +13,7 @@ files3 = ['a3_G1', 'a3_G2', 'a3_G3', 'a3_G4', 'a3_G5']
 
 files0 = ['1']
 
-for file in files2:
+for file in files:
     img = cv2.imread(f'FOU_data/{file}.png', cv2.IMREAD_UNCHANGED)
     if file == '100000':
         file_name = '\\infty'
@@ -54,7 +55,7 @@ for file in files2:
         x = x - np.mean(x)
         #result = np.correlate(x, x, mode='full')
         #return result[result.size // 2:] / (np.var(x) * np.arange(n, 0, -1))
-        result = np.array([np.sum(x[:n-k] * x[k:]) for k in range(n)]) / np.sum(x ** 2)
+        result = np.array([np.sum(x[:n-k] * x[k:]) for k in range(n)]) / np.sqrt(np.array([np.sum(x[:n-k] ** 2) * np.sum(x[k:] ** 2) for k in range(n)]))
         return result
 
     def find_extrema(x):
@@ -67,8 +68,8 @@ for file in files2:
                 minima.append(i)
         return maxima, minima
 
-    autocor_res = autocorrelation(average_slice)
-    maxima, minima = find_extrema(autocor_res)
+    #autocor_res = autocorrelation(average_slice)
+    #maxima, minima = find_extrema(autocor_res)
 
     #print(f"Distances between maxima: {np.diff(maxima)}")
     #print(f"Distances between minima: {np.diff(minima)}")
@@ -78,7 +79,7 @@ for file in files2:
             {
                 'xdata': t_data,
                 'ydata': average_slice,
-                'label': 'Gitter ' + file_name,
+                'label': f'max Beugungsordnung ${file_name}$',
                 'line': '-',
                 'marker': None,
                 'confidence': [(average_slice - std_slice , average_slice + std_slice), (average_slice - 2*std_slice, average_slice + 2*std_slice)]
@@ -86,31 +87,31 @@ for file in files2:
         ],
         x_label='Pixel Spalte',
         y_label='Summe der Intensitäten',
-        title=f'Intensitätsprofil mit Gitter {file_name}',
+        title=f'Intensitätsprofil mit Gitter 1 und max. Beugungsordnung ${file_name}$',
         filename=f'Plots/FOU_{file}.pdf',
         width=25,
-        height=12,
+        height=9,
         plot=False,
     )
 
-    plot_data(
-        datasets=[
-            {
-                'xdata': t_data,
-                'ydata': autocor_res,
-                'label': 'Autokorrelation',
-                'line': '-',
-                'marker': None,
-            },
-        ],
-        x_label='Verzögerung',
-        y_label='Autokorrelation',
-        title='Autokorrelation des Intensitätsprofils',
-        filename=f'Plots/FOU_{file}_autocorrelation.pdf',
-        width=25,
-        height=10,
-        plot=False,
-    )
+    #plot_data(
+    #    datasets=[
+    #        {
+    #            'xdata': t_data,
+    #            'ydata': autocor_res,
+    #            'label': 'Autokorrelation',
+    #            'line': '-',
+    #            'marker': None,
+    #        },
+    #    ],
+    #    x_label='Verzögerung',
+    #    y_label='Autokorrelation',
+    #    title='Autokorrelation des Intensitätsprofils',
+    #    filename=f'Plots/FOU_{file}_autocorrelation.pdf',
+    #    width=25,
+    #    height=10,
+    #    plot=False,
+    #)
 
 
 
@@ -148,7 +149,7 @@ for idx, N in enumerate(orders):
     axes[idx].grid(True)
     axes[idx].legend(loc='upper right')
 
-axes[-1].set_xlabel('Time')  # Add x-axis label to the last subplot
+axes[-1].set_xlabel('x')  # Add x-axis label to the last subplot
 
 # Remove plt.tight_layout() if using constrained_layout
 # plt.tight_layout()
