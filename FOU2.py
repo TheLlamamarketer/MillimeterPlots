@@ -1,4 +1,3 @@
-from matplotlib.pylab import f
 import numpy as np
 from plotting_minus import plot_data
 from tables import *

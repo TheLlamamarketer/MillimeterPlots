@@ -1,4 +1,3 @@
-from turtle import title
 import numpy as np
 from plotting_minus import plot_data
 import matplotlib.pyplot as plt
