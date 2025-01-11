@@ -2,11 +2,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from lmfit import Model
+from decimal import Decimal, getcontext
+getcontext().prec = 50
 
 def FirstSignificant(x):
     if x == 0:
         return 0
     return -int(np.floor(np.log10(abs(x))))
+
+def LastSignificant(x):
+    if x == 0:
+        return 0
+    d = Decimal(str(x))
+    fractional_part = str(d).split('.')[-1] if '.' in str(d) else ''
+    return len(fractional_part)
+
+print(LastSignificant(Decimal("0.1000")))
+print(LastSignificant(Decimal('199998888.1000')))
 
 def round_val(val, err=0, intermed=True):
     if val == 0:

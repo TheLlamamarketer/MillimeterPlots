@@ -4,16 +4,14 @@ import random
 import colorsys
 import matplotlib.colors as mcolors
 
-def generate_contrasting_color(index, total, bg_hex='#FFFFFF', color_seed=None, 
-                               base_hue_offset=0.5, saturation=0.7, value=0.6):
+def generate_contrasting_color(index, total_colors, bg_hex='#FFFFFF', color_seed=100, 
+                               initial_hue_offset=0.5, hue_range=0.7, saturation=0.7, value=0.75, variation=0.15):
     """
     Generate a contrasting color relative to a (possibly neutral) background color.
     If the background is too close to white or grayscale (low saturation),
     we just pick a random initial hue rather than relying on background hue.
     """
-    # Seed once outside this function if needed, or just here if you want
-    if color_seed is not None and index == 0:
-        random.seed(color_seed)
+    random.seed(color_seed)
     
     bg_rgb = mcolors.hex2color(bg_hex)
     bg_hue, bg_sat, bg_val = colorsys.rgb_to_hsv(*bg_rgb)
@@ -22,27 +20,35 @@ def generate_contrasting_color(index, total, bg_hex='#FFFFFF', color_seed=None,
     if bg_sat < 0.05:  
         if index == 0:
             # Random initial hue if this is the first dataset
-            initial_hue = random.random() if color_seed is not None else 0.0
+            initial_hue = random.random()
             # Store it as a global or static variable if you need consistency
             generate_contrasting_color._initial_hue = initial_hue
         else:
             initial_hue = getattr(generate_contrasting_color, '_initial_hue', 0.5)
         bg_hue = initial_hue
 
-    # Slight variation in hue if total > 1
-    if total > 1:
-        # Introduce some hue variation per dataset
-        hue_variation = random.uniform(-0.1, 0.1) if color_seed is not None else 0.0
-        hue = (bg_hue + base_hue_offset + (index / (total - 1)) * 0.5 + hue_variation) % 1.0
+    hue_variation = random.uniform(-variation, variation)
+    if total_colors > 1:
+        hue = (bg_hue + initial_hue_offset + (index / (total_colors - 1)) * hue_range + hue_variation) % 1.0
     else:
-        # Single dataset, no scaling by total
-        hue_variation = random.uniform(-0.1, 0.1) if color_seed is not None else 0.0
-        hue = (bg_hue + base_hue_offset + hue_variation) % 1.0
+        hue = (bg_hue + initial_hue_offset + hue_variation) % 1.0
 
     r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
-    return '#{:02x}{:02x}{:02x}'.format(int(r * 255), int(g * 255), int(b * 255))
+    return mcolors.to_hex([r, g, b])
 
-def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF'):
+def varied_color(base_hex, color_seed=100, hue_range=0.04, index=0):
+    random.seed(color_seed + hash(base_hex) + index*10) 
+
+    base_rgb = mcolors.to_rgb(base_hex)
+    base_hue, base_sat, base_val = colorsys.rgb_to_hsv(*base_rgb)
+
+    hue_offset = random.uniform(-hue_range, hue_range) if hue_range > 0 else 0.0
+    new_hue = (base_hue + hue_offset) % 1.0
+
+    rgb = colorsys.hsv_to_rgb(new_hue, base_sat, base_val)
+    return mcolors.to_hex([*rgb])
+
+def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF', hue_range=0.1):
     """
     Assign colors to datasets based on their color groups or individual IDs.
     If a dataset has a 'color' set, that color is used.
@@ -74,28 +80,34 @@ def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF'):
 
     # Generate or retrieve colors
     colors = {}
-    for key, color_idx in color_indices.items():
-        if isinstance(key, str):
-            # This is a color_group
-            datasets_in_group = color_group_dict[key]
-            # If any dataset in group specifies a color, use that
-            specified_color = next((d['color'] for d in datasets_in_group if 'color' in d and d['color'] is not None), None)
-            if specified_color:
-                colors[key] = specified_color
-            else:
-                # Generate a color for the group
-                colors[key] = generate_contrasting_color(
-                    color_idx, total_colors_needed, bg_hex=bg_hex, color_seed=color_seed
-                )
+
+    for group in color_group_dict:
+        group_datasets = color_group_dict[group]
+
+        specified_color = next((d['color'] for d in group_datasets if 'color' in d and d['color'] is not None), None)
+        if specified_color:
+            group_base_color = specified_color
         else:
-            # This is a dataset without a group
-            data = next(d for d in datasets_without_color_group if id(d) == key)
+            group_color_idx = color_indices[group]
+            group_base_color = generate_contrasting_color(
+                group_color_idx, total_colors_needed, bg_hex=bg_hex, color_seed=color_seed
+            )
+        
+        for i, data in enumerate(group_datasets):
             if 'color' in data and data['color'] is not None:
-                colors[key] = data['color']
+                colors[id(data)] = data['color']
             else:
-                colors[key] = generate_contrasting_color(
-                    color_idx, total_colors_needed, bg_hex=bg_hex, color_seed=color_seed
-                )
+                colors[id(data)] = varied_color(group_base_color, color_seed=color_seed, hue_range=hue_range, index=i)
+
+    for data in datasets_without_color_group:
+        if 'color' in data and data['color'] is not None:
+            colors[id(data)] = data['color']
+        else:
+            color_idx = color_indices[id(data)]
+            colors[id(data)] = generate_contrasting_color(
+                color_idx, total_colors_needed, bg_hex=bg_hex, color_seed=color_seed
+            )
+            
     return colors
 
 
@@ -118,13 +130,6 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         xdata = data.get('xdata', [])
         ydata = np.array(data.get('ydata', []), dtype=float)
 
-        if isinstance(xdata[0], str):
-            xdata = np.array(range(len(xdata)))
-            ax.set_xticks(xdata)
-            ax.set_xticklabels(data.get('xdata', []))
-        else:
-            xdata = np.array(xdata, dtype=float)
-
         y_error = data.get('y_error')
         x_error = data.get('x_error')
         label = data.get('label')
@@ -135,15 +140,23 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         confidence_label = data.get('confidence_label', True)
         fit = data.get('fit', None)
         fit_label = data.get('fit_label', True)
-        color_group = data.get('color_group')
         high_res_x = data.get('high_res_x', None)
 
         color = data.get('color')
         if color is None:
-            color = colors[color_group if color_group else id(data)]
+            color = colors[id(data)]
 
-        if xdata.size == 0 or ydata.size == 0:
+        if len(xdata) == 0 or len(ydata) == 0:
             continue
+        
+        if isinstance(xdata[0], str):
+            xdata = np.array(range(len(xdata)))
+            ax.set_xticks(xdata)
+            ax.set_xticklabels(data.get('xdata', []))
+        else:
+            xdata = np.array(xdata, dtype=float)
+
+
 
         if confidence:
             for i, (lower, upper) in enumerate(confidence):
@@ -183,7 +196,7 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
                 xerr=[np.abs(xerr_lower), np.abs(xerr_upper)] if x_error is not None else None,
                 fmt=marker, color=color, linestyle='none',
                 capsize=2, elinewidth=0.5, capthick=0.5,
-                label=label, markersize=5, alpha=0.9, zorder=4
+                label=label, markersize=6, alpha=0.9, zorder=4
             )
        
     handles, labels = ax.get_legend_handles_labels()
