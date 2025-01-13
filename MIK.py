@@ -1,6 +1,6 @@
 import numpy as np
 from traitlets import Instance
-from plotting_minus import plot_data
+from plotting import plot_data
 from help import *
 from tables import print_standard_table, print_complex_table
 

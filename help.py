@@ -17,9 +17,6 @@ def LastSignificant(x):
     fractional_part = str(d).split('.')[-1] if '.' in str(d) else ''
     return len(fractional_part)
 
-print(LastSignificant(Decimal("0.1000")))
-print(LastSignificant(Decimal('199998888.1000')))
-
 def round_val(val, err=0, intermed=True):
     if val == 0:
         return 0, err
@@ -173,6 +170,7 @@ def print_result(a, b, da, db, R2, s2):
     print(f"Bestimmtheitsmaß {{R^2}} = {R2}")
     print(f"Varianz {{s^2}} = {s2}")
     print()
+
 
 def plot(x, y, dy, a, b, da, db, xlabel="x", ylabel="y", title=None):
     plt.errorbar(x, y, yerr=dy, fmt="kx", capsize=6, capthick=1, label="Datenpunkte")  

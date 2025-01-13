@@ -77,7 +77,7 @@ def print_standard_table(
     # Print group headers if provided
     if header_groups:
         group_row = " & ".join(
-            [f"\\multicolumn{{{span}}}{{c|}}{{{name}}}" for name, span in header_groups]
+            [f"\\multicolumn{{{span}}}{{|c|}}{{{name}}}" for name, span in header_groups]
         )
         print(f"    {group_row} \\\\")
         print("    \\midrule")
@@ -155,30 +155,37 @@ def print_standard_table(
 
                     # Decide on intermed condition
                     intermed = entry.get("intermed", False)
+                    round_value = entry.get("round", True)
 
-                    # Handle cases where value is zero
-                    if value == 0 and error_value != 0:
-                        formatted_value = "{$" + f"{value}" + " \\pm " + f"{error_value}" + "$}"
-                    elif error_value != 0:
-                        rounded_val, err_round, power = round_val(value, err=error_value, intermed=intermed)
-
-                        if power <= 0:
-                            formatted_val_str = f"{rounded_val:.0f}"
-                            formatted_err_str = f"{err_round:.0f}"
+                    if not round_value:
+                        if error_value != 0:
+                            formatted_value = "{$" + f"{value}" + " \\pm " + f"{error_value}" + "$}"
                         else:
-                            formatted_val_str = f"{rounded_val:.{power}f}"
-                            formatted_err_str = f"{err_round:.{power}f}"
-
-                        formatted_value = "{$" + f"{formatted_val_str}" + " \\pm " + f"{formatted_err_str}" + "$}"
+                            formatted_value = "{$" + f"{value}" + "$}"
                     else:
-                        rounded_val, power = round_val(value, err=0, intermed=intermed)
+                        # Handle cases where value is zero
+                        if value == 0 and error_value != 0:
+                            formatted_value = "{$" + f"{value}" + " \\pm " + f"{error_value}" + "$}"
+                        elif error_value != 0:
+                            rounded_val, err_round, power = round_val(value, err=error_value, intermed=intermed)
 
-                        if power <= 0:
-                            formatted_val_str = f"{rounded_val:.0f}"
+                            if power <= 0:
+                                formatted_val_str = f"{rounded_val:.0f}"
+                                formatted_err_str = f"{err_round:.0f}"
+                            else:
+                                formatted_val_str = f"{rounded_val:.{power}f}"
+                                formatted_err_str = f"{err_round:.{power}f}"
+
+                            formatted_value = "{$" + f"{formatted_val_str}" + " \\pm " + f"{formatted_err_str}" + "$}"
                         else:
-                            formatted_val_str = f"{rounded_val:.{power}f}"
+                            rounded_val, power = round_val(value, err=0, intermed=intermed)
 
-                        formatted_value = "{$" + f"{formatted_val_str}" + "$}"
+                            if power <= 0:
+                                formatted_val_str = f"{rounded_val:.0f}"
+                            else:
+                                formatted_val_str = f"{rounded_val:.{power}f}"
+
+                            formatted_value = "{$" + f"{formatted_val_str}" + "$}"
 
             except (IndexError, KeyError) as e:
                 formatted_value = ""
@@ -205,6 +212,20 @@ def print_standard_table(
 
 
 def print_complex_table( data, headers, header_groups=None, caption=None, label=None, column_formats=None, si_setup=None, show=True):
+    """
+    Parameters:
+    data (dict or list of dicts): The data to be displayed in the table. Each dictionary represents a block of data.
+    headers (dict): A dictionary where keys are column identifiers and values are dictionaries containing header information.
+        Each header dictionary should have a "label" key for the column label and optionally "dark" for dark column formatting.
+    header_groups (list of tuples, optional): A list of tuples where each tuple contains a group name and the span of columns it covers.
+    caption (str, optional): The caption for the table.
+    label (str, optional): The label for the table, used for referencing in LaTeX.
+    column_formats (list of str, optional): A list of column formats for each column. If not provided, default formats are used.
+    si_setup (str, optional): SI unit setup string for formatting numerical values.
+    show (bool, optional): If False, the function will not print the table. Default is True.
+    Returns:
+    None
+    """
 
     if not show:
         return

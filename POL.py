@@ -33,7 +33,7 @@ fit_limit = x[x <= divergence_angle]
 import matplotlib.pyplot as plt
 import pandas as pd
 from help import *
-from plotting_minus import plot_data
+from plotting import plot_data
 from tables import print_standard_table, print_complex_table
 
 data0 = {

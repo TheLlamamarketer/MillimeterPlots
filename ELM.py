@@ -1,6 +1,6 @@
 from random import seed
 import numpy as np
-from plotting_minus import plot_data
+from plotting import plot_data
 from tables import *
 from help import *
 from scipy.interpolate import UnivariateSpline
@@ -14,7 +14,7 @@ data = {
     '1': {
         'R': {
             'U': [
-                "0.000", "2.003", "3.998", "6.008", "8.00", "10.03", "12.02", "14.00",
+                "0.000", "2.003", "3.999", "6.008", "8.00", "10.03", "12.02", "14.00",
                 "16.00", "18.00", "20.00", "22.00", "24.00", "26.00", "28.00", "30.00", "30.99"
             ],
             'I': [
@@ -177,6 +177,11 @@ for key in data:
                     for key4 in data[key][key2][key3]:
                         data[key][key2][key3][key4] = np.array(data[key][key2][key3][key4])
 
+
+
+
+headers = {'UR': {}, 'IR': {}, 'ULamp': {}, 'ILamp': {}, 'UGraphite': {}, 'IGraphite': {}}
+
 for key in data['1']:
     U = np.array([Decimal(U) for U in data['1'][key]['U']])
     U0 = max(U)
@@ -193,12 +198,15 @@ for key in data['1']:
     dI0 = calc_dI(I0)
     I0 = float(I0)
 
+    # Set error to 0 if the value is 0
+    dU = np.where(U == 0, 0, dU)
+    dI = np.where(I == 0, 0, dI)
 
-    print(U)
-    print(dU)
+    headers['U' + key] = {'label': '{U / V}', 'data': U, 'err': dU}
+    headers['I' + key] = {'label': '{I / mA}', 'data': 1000 * I if key == 'Graphite' else I, 'err': 1000 * dI if key == 'Graphite' else dI}
 
-    data['1'][key]['dU'] = np.where(U == 0, 0, U/U0 * np.sqrt((dU / U) ** 2 + (dU0 / U0) ** 2) ) 
-    data['1'][key]['dI'] = np.where(I == 0, 0, I/I0 * np.sqrt((dI / I) ** 2 + (dI0 / I0) ** 2) ) 
+    data['1'][key]['dU'] =  U/U0 * np.sqrt((dU / np.where(U == 0, np.nan, U)) ** 2 + (dU0 / U0) ** 2)
+    data['1'][key]['dI'] =  I/I0 * np.sqrt((dI / np.where(U == 0, np.nan, I)) ** 2 + (dI0 / I0) ** 2)
     data['1'][key]['U'] = U / U0
     data['1'][key]['I'] = I / I0
 
@@ -206,6 +214,20 @@ for key in data['1']:
 spline_R = UnivariateSpline(data['1']['R']['U'], data['1']['R']['I'], s=2)
 spline_Lamp = UnivariateSpline(data['1']['Lamp']['U'], data['1']['Lamp']['I'], s=0, k=3)
 spline_Graphite = UnivariateSpline(data['1']['Graphite']['U'], data['1']['Graphite']['I'], s=2)
+
+
+header_groups = [('Ohmscher Widerstand', 2), ('Lampe', 2), ('Graphit Stab', 2)]
+
+print_standard_table(
+    data=data['1'],
+    headers=headers,
+    header_groups=header_groups,
+    column_formats= ["2.1"] * len(headers),
+    caption="Kennlinien für die verschiedenen Materialien. Die Spannung $U$ und Stromstärke $I$ wurden noch nicht auf die maximalen Werte normiert.",
+    label="tab:A1",
+    show=False
+)
+
 
 
 
@@ -248,9 +270,12 @@ plot_data(
     title='1',
     filename=f'Plots/ELM_1.pdf',
     color_seed=1,
+    width=20,
+    height=20,
     plot=False
 )
 
+headers2 = {'U_a': {}, 's_a': {}, 'U_b': {}, 's_b': {},}
 
 for key in data['2']:
     if isinstance(data['2'][key], dict):
@@ -260,17 +285,33 @@ for key in data['2']:
         s = np.array([float(s) for s in data['2'][key]['s']])
         s0 = float(data['2']['s0'][0])
         smin = float(data['2']['smin'][0])
+        data['2']['ds'] = [float(item) for item in data['2']['ds']]
 
-        dU = calc_dU(U)
+        dU = np.where(U == 0, 0, calc_dU(U))
         U = np.array(U, dtype=float)
         dU0 = calc_dU(U0)
         U0 = float(U0)
 
-        data['2'][key]['dU'] = np.where(U == 0, 0, U/U0 * np.sqrt((dU / U) ** 2 + (dU0 / U0) ** 2) )
+        headers2['U_' + key] = {'label': '{U / V}', 'data': U[::-1], 'err': dU[::-1], }
+        headers2['s_' + key] = {'label': '{s}', 'data': (s - smin)[::-1], 'err': [0] + data['2']['ds']* (len(s)-1)}
+
+        data['2'][key]['dU'] = U/U0 * np.sqrt((dU / np.where(U == 0, np.nan, U)) ** 2 + (dU0 / U0) ** 2)
         data['2'][key]['U'] = U / U0
         data['2'][key]['s'] = (s - smin) / s0
-        data['2']['ds'] = [float(item) for item in data['2']['ds']]
-            
+
+header_groups2 = [('unbelastet', 2), ('belastet', 2)]
+
+print_standard_table(
+    data=data['2'],
+    headers=headers2,
+    header_groups=header_groups2,
+    column_formats= ["2.1"] * len(headers2),
+    caption="Kennlinien für eine belastete und unbelastete Potentiometer. Es wurde noch nicht auf die maximalen Werte normiert.",
+    label="tab:A2",
+    show=False
+)
+
+
 
 
 def fit_belastet(x, Rl):
@@ -305,8 +346,13 @@ plot_data(
     title='2',
     filename=f'Plots/ELM_2.pdf',
     color_seed=1,
+    width=20,
+    height=20,
     plot=False
 )
+
+headers3 = {'U_U-right_fine': {}, 'I_U-right_fine': {}, 'U_U-right_rough': {}, 'I_U-right_rough': {}, 'U_I-right_fine': {}, 'I_I-right_fine': {}, 'U_I-right_rough': {}, 'I_I-right_rough': {}}
+
 
 for key in data['3']:
     for key2 in data['3'][key]:
@@ -317,6 +363,22 @@ for key in data['3']:
         data['3'][key][key2]['dI'] = calc_dI(I)
         data['3'][key][key2]['U'] = np.array(U, dtype=float)
         data['3'][key][key2]['I'] = np.array(I, dtype=float)
+
+        headers3['U_' + key + '_' + key2] = {'label': '{U / V}', 'data': U, 'round': False}
+        headers3['I_' + key + '_' + key2] = {'label': '{I / A}' if key2 == 'rough' else '{I /mA}', 'data':I, 'round': False}	
+        
+header_groups3 = [('Spannungsrichtig (fein)', 2), ('Spannungsrichtig (grob)', 2), ('Stromrichtig (fein)', 2), ('Stromrichtig (grob)', 2)]
+
+print_standard_table(
+    data=data['3'],
+    headers=headers3,
+    header_groups=header_groups3,
+    column_formats= ["2.1"] * len(headers3),
+    caption="Kennlinien für eine belastete und unbelastete Potentiometer. Es wurde noch nicht auf die maximalen Werte normiert.",
+    label="tab:A3",
+    show=True
+)
+
 
 plot_data(
     datasets=[
@@ -336,7 +398,7 @@ plot_data(
             'x_error': data['3']['U-right']['rough']['dU'],
             'y_error': data['3']['U-right']['rough']['dI'] * 1000,
             'label': 'U-richtig grob korrigiert',
-            'marker': '.',
+            'marker': 'x',
             'line': 'None',
             'color_group': '1',
         }, 
@@ -356,7 +418,7 @@ plot_data(
             'x_error': data['3']['U-right']['fine']['dU'],
             'y_error': data['3']['U-right']['fine']['dI'],
             'label': 'U-richtig fein korrigiert',
-            'marker': '.',
+            'marker': 'x',
             'line': 'None',
             'color_group': '2',
         },
@@ -370,13 +432,13 @@ plot_data(
             'line': 'None',
             'color_group': '3',
         },
-            {
+        {
             'xdata': data['3']['I-right']['rough']['U'] - data['3']['I-right']['rough']['I']*0.1,
             'ydata': (data['3']['I-right']['rough']['I']) * 1000,
             'x_error': data['3']['I-right']['rough']['dU'],
             'y_error': data['3']['I-right']['rough']['dI'] * 1000,
             'label': 'I-richtig grob korrigiert',
-            'marker': '.',
+            'marker': 'x',
             'line': 'None',
             'color_group': '3',
         },
@@ -396,7 +458,7 @@ plot_data(
             'x_error': data['3']['I-right']['fine']['dU'],
             'y_error': data['3']['I-right']['fine']['dI'],
             'label': 'I-richtig fein korrigiert',
-            'marker': '.',
+            'marker': 'x',
             'line': 'None',
             'color_group': '4',
         },
@@ -406,7 +468,7 @@ plot_data(
     title='3',
     filename=f'Plots/ELM_3.pdf',
     color_seed=37,
-    plot=True
+    plot=False
 )
 
 plot_data(
@@ -415,8 +477,9 @@ plot_data(
             'xdata': data['3']['U-right']['rough']['U'],
             'ydata': np.log(data['3']['U-right']['rough']['I']* 1000),
             'label': 'U-richtig grob',
-            'marker': 'x',
+            'marker': '.',
             'line': 'None',
+            'color_group': '1',
         }, 
         {
             'xdata': data['3']['U-right']['rough']['U'],
@@ -424,27 +487,31 @@ plot_data(
             'label': 'U-richtig grob korrigiert',
             'marker': 'x',
             'line': 'None',
-        }, {},{},
+            'color_group': '1',
+        }, 
         {
             'xdata': data['3']['U-right']['fine']['U'],
             'ydata': np.log(data['3']['U-right']['fine']['I']),
             'label': 'U-richtig fein',
             'marker': '.',
             'line': 'None',
+            'color_group': '2',
         }, 
         {
             'xdata': data['3']['U-right']['fine']['U'],
             'ydata': np.log(data['3']['U-right']['fine']['I'] - data['3']['U-right']['fine']['U']/(11.11e6)),
             'label': 'U-richtig fein korrigiert',
-            'marker': '.',
+            'marker': 'x',
             'line': 'None',
-        }, {},{},
+            'color_group': '2',
+        },
         {
             'xdata': data['3']['I-right']['rough']['U'],
             'ydata': np.log(data['3']['I-right']['rough']['I']*1000),
             'label': 'I-richtig grob',
-            'marker': 'x',
+            'marker': '.',
             'line': 'None',
+            'color_group': '3',
         },
         {
             'xdata': data['3']['I-right']['rough']['U'] - data['3']['I-right']['rough']['I']*0.1,
@@ -452,26 +519,29 @@ plot_data(
             'label': 'I-richtig grob korrigiert',
             'marker': 'x',
             'line': 'None',
-        }, {},{},
+            'color_group': '3',
+        },
         {
             'xdata': data['3']['I-right']['fine']['U'],
             'ydata': np.log(data['3']['I-right']['fine']['I']),
             'label': 'I-richtig fein',
             'marker': '.',
             'line': 'None',
+            'color_group': '4',
         },
         {
             'xdata': data['3']['I-right']['fine']['U'] - data['3']['I-right']['fine']['I']*3.9/1000,
             'ydata': np.log(data['3']['I-right']['fine']['I']),
             'label': 'I-richtig fein korrigiert',
-            'marker': '.',
+            'marker': 'x',
             'line': 'None',
+            'color_group': '4',
         },
     ],
     x_label='U/V',
     y_label='ln(I)/ln(mA)',
     title='3-log',
     filename=f'Plots/ELM_3_log.pdf',
-    color_seed=143,
+    color_seed=37,
     plot=False
 )

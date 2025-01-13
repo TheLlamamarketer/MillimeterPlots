@@ -1,8 +1,6 @@
 import numpy as np
 import math
 
-
-
 def largest_power_of_10(n):
     if n != 0:
         exponent = math.floor(math.log10(abs(n)))

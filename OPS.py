@@ -1,5 +1,5 @@
 import numpy as np
-from plotting_minus import plot_data
+from plotting import plot_data
 import matplotlib.pyplot as plt
 from scipy.interpolate import UnivariateSpline
 import math
