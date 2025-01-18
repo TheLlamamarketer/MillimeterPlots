@@ -263,7 +263,7 @@ data = {
 # plot_data_plus(ymin=0, ymax=224, ystep=20, xmin=1100, xmax=1700, xstep=50, x_label='Kanalnummer', y_label='Impulse', datasets=[{'xdata':data['Kanalnummer'], 'ydata': data['Impulse'], 'label':'Daten'}], filename='Plots/GAM_7.pdf')
 
 
-from sympy import sin, symbols, diff
+from mathy import sin, symbols, diff
 
 x, y, z = symbols("x y z", real=True)
 f = 4 * x * y + x * sin(z) + x**3 + z**8 * y

@@ -1,10 +1,10 @@
-from random import seed
 import numpy as np
 from plotting import plot_data
 from tables import *
 from help import *
 from scipy.interpolate import UnivariateSpline
 from decimal import Decimal, getcontext
+
 
 getcontext().prec = 20
 
@@ -24,7 +24,7 @@ data = {
             'R': ["468.2"],
             'dU': [],
             'dI': [],
-            'dR': []
+            'dR': [],
         },
         'Lamp': {
             'U': [
@@ -267,7 +267,7 @@ plot_data(
     ],
     x_label='U/Umax',
     y_label='I/Imax',
-    title='1',
+    title='Kennlinien verschiedener Materialien',
     filename=f'Plots/ELM_1.pdf',
     color_seed=1,
     width=20,
@@ -343,7 +343,7 @@ plot_data(
 
     x_label='s/s0',
     y_label='U/U0',
-    title='2',
+    title='Spannungsverlauf Potentiometer belestet und unbelastet',
     filename=f'Plots/ELM_2.pdf',
     color_seed=1,
     width=20,
@@ -465,9 +465,105 @@ plot_data(
     ],
     x_label='U/V',
     y_label='I/mA',
-    title='3',
+    title='Kennlinie Diode mit U und I richtige Messung',
     filename=f'Plots/ELM_3.pdf',
     color_seed=37,
+    height=20,
+    plot=False
+)
+
+plot_data(
+    datasets=[
+        {
+            'xdata': data['3']['U-right']['rough']['U'],
+            'ydata': data['3']['U-right']['rough']['I'] * 1000,
+            'x_error': data['3']['U-right']['rough']['dU'],
+            'y_error': data['3']['U-right']['rough']['dI'] * 1000,
+            'label': 'U-richtig grob',
+            'marker': '.',
+            'line': 'None',
+            'color_group': '1',
+        },
+        {
+            'xdata': data['3']['U-right']['rough']['U'],
+            'ydata': (data['3']['U-right']['rough']['I'] - data['3']['U-right']['rough']['U']/(11.11e6)) * 1000,
+            'x_error': data['3']['U-right']['rough']['dU'],
+            'y_error': data['3']['U-right']['rough']['dI'] * 1000,
+            'label': 'U-richtig grob korrigiert',
+            'marker': 'x',
+            'line': 'None',
+            'color_group': '1',
+        }, 
+        {
+            'xdata': data['3']['U-right']['fine']['U'],
+            'ydata': data['3']['U-right']['fine']['I'],
+            'x_error': data['3']['U-right']['fine']['dU'],
+            'y_error': data['3']['U-right']['fine']['dI'],
+            'label': 'U-richtig fein',
+            'marker': '.',
+            'line': 'None',
+            'color_group': '2',
+        },
+        {
+            'xdata': data['3']['U-right']['fine']['U'],
+            'ydata': data['3']['U-right']['fine']['I'] - data['3']['U-right']['fine']['U']/(11.11e6) * 1000,
+            'x_error': data['3']['U-right']['fine']['dU'],
+            'y_error': data['3']['U-right']['fine']['dI'],
+            'label': 'U-richtig fein korrigiert',
+            'marker': 'x',
+            'line': 'None',
+            'color_group': '2',
+        },
+        {
+            'xdata': data['3']['I-right']['rough']['U'],
+            'ydata': data['3']['I-right']['rough']['I']*1000,
+            'x_error': data['3']['I-right']['rough']['dU'],
+            'y_error': data['3']['I-right']['rough']['dI']*1000,
+            'label': 'I-richtig grob',
+            'marker': '.',
+            'line': 'None',
+            'color_group': '3',
+        },
+        {
+            'xdata': data['3']['I-right']['rough']['U'] - data['3']['I-right']['rough']['I']*0.1,
+            'ydata': (data['3']['I-right']['rough']['I']) * 1000,
+            'x_error': data['3']['I-right']['rough']['dU'],
+            'y_error': data['3']['I-right']['rough']['dI'] * 1000,
+            'label': 'I-richtig grob korrigiert',
+            'marker': 'x',
+            'line': 'None',
+            'color_group': '3',
+        },
+        {
+            'xdata': data['3']['I-right']['fine']['U'],
+            'ydata': data['3']['I-right']['fine']['I'],
+            'x_error': data['3']['I-right']['fine']['dU'],
+            'y_error': data['3']['I-right']['fine']['dI'],
+            'label': 'I-richtig fein',
+            'marker': '.',
+            'line': 'None',
+            'color_group': '4',
+        },
+        {
+            'xdata': data['3']['I-right']['fine']['U'] - data['3']['I-right']['fine']['I']*3.9/1000,
+            'ydata': data['3']['I-right']['fine']['I'],
+            'x_error': data['3']['I-right']['fine']['dU'],
+            'y_error': data['3']['I-right']['fine']['dI'],
+            'label': 'I-richtig fein korrigiert',
+            'marker': 'x',
+            'line': 'None',
+            'color_group': '4',
+        },
+    ],
+    x_label='U/V',
+    y_label='I/mA',
+    title='Kennlinie Diode mit U und I richtige Messung',
+    ymax = 150,
+    xmax = 0.84,
+    ymin = -10,
+    filename=f'Plots/ELM_3 2.pdf',
+    color_seed=37,
+    height=20,
     plot=False
 )
 
@@ -540,7 +636,7 @@ plot_data(
     ],
     x_label='U/V',
     y_label='ln(I)/ln(mA)',
-    title='3-log',
+    title='Kennlinie Diode mit U und I richtige Messung logarithmiert',
     filename=f'Plots/ELM_3_log.pdf',
     color_seed=37,
     plot=False

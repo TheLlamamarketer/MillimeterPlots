@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import random
+import hashlib
 import colorsys
 import matplotlib.colors as mcolors
 
@@ -34,9 +35,11 @@ def generate_contrasting_color(index, total_colors, bg_hex='#FFFFFF', color_seed
     rgb = colorsys.hsv_to_rgb(hue, saturation, value)
     return mcolors.to_hex([*rgb])
 
+def stable_hash(value):
+    return int(hashlib.md5(value.encode()).hexdigest(), 16)
 
 def varied_color(base_hex, color_seed=100, hue_range=0.04, index=0):
-    random.seed(color_seed + hash(base_hex) + index*10) 
+    random.seed(color_seed + stable_hash(base_hex) + index * 10)
 
     base_rgb = mcolors.to_rgb(base_hex)
     base_hue, base_sat, base_val = colorsys.rgb_to_hsv(*base_rgb)
@@ -47,11 +50,12 @@ def varied_color(base_hex, color_seed=100, hue_range=0.04, index=0):
     rgb = colorsys.hsv_to_rgb(new_hue, base_sat, base_val)
     return mcolors.to_hex([*rgb])
 
-def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF', hue_range=0.1):
+def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF', hue_range=0.05):
     """
     Assign colors to datasets based on their color groups or individual IDs.
     If a dataset has a 'color' set, that color is used.
-    Otherwise, colors are generated to maximize contrast from a background color.
+    Otherwise, new colors are generated to ensure contrast and variation.
+    Datasets with the same 'color_group' will share a base color with slight variations.
     """
     color_group_dict = {}
     datasets_without_color_group = []
@@ -106,7 +110,6 @@ def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF', hue_range=0.
             colors[id(data)] = generate_contrasting_color(
                 color_idx, total_colors_needed, bg_hex=bg_hex, color_seed=color_seed
             )
-            
     return colors
 
 def plot_grid(ax, width, height, bg_hex, xstep, xtickoffset, xmin, xmax, ystep, ytickoffset, ymin, ymax):

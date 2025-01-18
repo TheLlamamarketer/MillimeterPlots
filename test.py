@@ -1,7 +1,7 @@
 from math import e
-import sympy as sp
+import mathy as sp
 from sympy.abc import n, t, x
-from sympy import oo
+from mathy import oo
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import quad
