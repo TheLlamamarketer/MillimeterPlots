@@ -109,6 +109,15 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
     if yerr is not None and not hasattr(yerr, '__len__'):
         yerr = np.array([yerr])
 
+    # Remove NaN and infinite values
+    mask = ~np.isnan(xdata) & ~np.isnan(ydata) & np.isfinite(xdata) & np.isfinite(ydata)
+    if yerr is not None:
+        mask &= ~np.isnan(yerr) & np.isfinite(yerr)
+    xdata = xdata[mask]
+    ydata = ydata[mask]
+    if yerr is not None:
+        yerr = yerr[mask]
+
     if model == "linear":
         def model_func(x, a, b): return a + b * x
     elif model == "quadratic":
@@ -123,8 +132,14 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
             if value is not None:
                 params[param].set(value=value, vary=False) 
 
-    if yerr is not None: result = model.fit(ydata, params, x=xdata, weights= 1.0 / yerr**2)
-    else: result = model.fit(ydata, params, x=xdata)
+    if yerr is not None:
+        if np.any(np.isnan(yerr)) or np.any(np.isnan(xdata)) or np.any(np.isnan(ydata)):
+            raise ValueError("NaN values detected in input data.")
+        result = model.fit(ydata, params, x=xdata, weights=1.0 / yerr**2)
+    else:
+        if np.any(np.isnan(xdata)) or np.any(np.isnan(ydata)):
+            raise ValueError("NaN values detected in input data.")
+        result = model.fit(ydata, params, x=xdata)
 
     return result
 

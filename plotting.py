@@ -167,11 +167,11 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         xdata = data.get('xdata', [])
         ydata = np.array(data.get('ydata', []), dtype=float)
 
-        y_error = data.get('y_error')
-        x_error = data.get('x_error')
+        y_error = data.get('yerr')
+        x_error = data.get('xerr')
         label = data.get('label')
         marker = data.get('marker', 'x')
-        line = data.get('line', '-')
+        line = data.get('line', 'None')
         line_fit = data.get('line_fit', '-')
         confidence = data.get('confidence', {})
         confidence_label = data.get('confidence_label', True)
@@ -222,15 +222,26 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
             try:
                 if isinstance(y_error, tuple) and len(y_error) == 2:
                     yerr_lower, yerr_upper = y_error
+                    if isinstance(yerr_lower, float):
+                        yerr_lower = np.full_like(ydata, yerr_lower)
+                        yerr_upper = np.full_like(ydata, yerr_upper)
+                elif isinstance(y_error, float):
+                    yerr_lower = np.full_like(ydata, y_error)
+                    yerr_upper = np.full_like(ydata, y_error)
                 else:
                     yerr_lower = y_error
                     yerr_upper = y_error
 
+
                 if isinstance(x_error, tuple) and len(x_error) == 2:
                     xerr_lower, xerr_upper = x_error
+                elif isinstance(x_error, float):
+                    xerr_lower = np.full_like(xdata, x_error)
+                    xerr_upper = np.full_like(xdata, x_error)
                 else:
                     xerr_lower = x_error
                     xerr_upper = x_error
+
 
                 ax.errorbar(
                     xdata, ydata, yerr=[np.abs(yerr_lower), np.abs(yerr_upper)] if y_error is not None else None,
