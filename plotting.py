@@ -169,15 +169,18 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
 
         y_error = data.get('yerr')
         x_error = data.get('xerr')
+
         label = data.get('label')
+
         marker = data.get('marker', 'x')
         line = data.get('line', 'None')
-        line_fit = data.get('line_fit', '-')
         confidence = data.get('confidence', {})
         confidence_label = data.get('confidence_label', True)
         fit = data.get('fit', None)
         fit_label = data.get('fit_label', True)
-        high_res_x = data.get('high_res_x', None)
+        fit_xdata = data.get('fit_xdata', None)
+        fit_line = data.get('fit_line', '-')
+        fit_error_lines = data.get('fit_error_lines', None)
 
         color = data.get('color')
         if color is None:
@@ -199,7 +202,7 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
                 for i, (lower, upper) in enumerate(confidence):
                     if lower is not None and upper is not None:
                         ax.fill_between(
-                            high_res_x if high_res_x is not None else xdata, lower, upper, interpolate=True,
+                            fit_xdata if fit_xdata is not None else xdata, lower, upper, interpolate=True,
                             facecolor=color, edgecolor=None, alpha=0.4 - (i * 0.1),
                             label=f"{label} CI ({i+1}σ)" if label and confidence_label else None, zorder=2
                         )
@@ -209,14 +212,28 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
 
         if fit is not None:
             try:
-                ax.plot(high_res_x if high_res_x is not None else xdata, fit, color=color, linestyle=line_fit, linewidth=1,
+                ax.plot(fit_xdata if fit_xdata is not None else xdata, fit, color=color, linestyle=fit_line, linewidth=1,
                         label=f"{label} Fit" if label and fit_label else None, zorder=3)
             except Exception as e:
                 print(f"Error in fit for dataset '{label}': {e}")
                 continue
+        
+        if fit_error_lines is not None:
+            try:
+                for (lower, upper) in fit_error_lines:
+                    if lower is not None:
+                        ax.plot(fit_xdata if fit_xdata is not None else xdata, lower, color=color, linestyle='--', linewidth=1,
+                                label=f"{label} Fit Error" if label and fit_label else None, zorder=3)
+                    if upper is not None:
+                        ax.plot(fit_xdata if fit_xdata is not None else xdata, upper, color=color, linestyle='--', linewidth=1,
+                                label=f"{label} Fit Error" if label and fit_label else None, zorder=3)
+            except Exception as e:
+                print(f"Error in fit error lines for dataset '{label}': {e}")
+                continue
+
 
         if y_error is None and x_error is None:
-            ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line,
+            ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line, linewidth=1,
                     label=label, markersize=10, alpha=0.9, zorder=4)
         else:
             try:
@@ -250,10 +267,11 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
                     capsize=3, elinewidth=0.6, capthick=0.6,
                     label=label, markersize=8, alpha=0.9, zorder=4
                 )
+                
             except Exception as e:
                 print(f"Error in error bars for dataset '{label}': {e}")
                 continue
-       
+        
     handles, labels = ax.get_legend_handles_labels()
     if any(labels) and legend_position:
         ax.legend(loc=legend_position)

@@ -35,6 +35,14 @@ def round_val(val, err=0, intermed=True):
         power = FirstSignificant(err_round)
         if intermed: power += 1
         return round(val, power), err_round, power
+    
+def print_round_val(val, err=0, intermed=True):
+    if err == 0:
+        rounded_val, _ = round_val(val, intermed=intermed)
+        return rounded_val
+    else:
+        rounded_val, rounded_err, _ = round_val(val, err, intermed=intermed)
+        return f"{rounded_val} \\pm {rounded_err}"
 
 def support(xdata, ydata, yerr=None):
     if yerr is None:
@@ -57,6 +65,13 @@ def support(xdata, ydata, yerr=None):
     return Sx, Sxx, Sy, Sxy, Sw
 
 def slope(xdata, ydata, yerr=None):
+    mask = ~np.isnan(xdata) & ~np.isnan(ydata) & np.isfinite(xdata) & np.isfinite(ydata)
+    if yerr is not None:
+        mask &= ~np.isnan(yerr) & np.isfinite(yerr)
+        yerr = yerr[mask]
+    xdata = xdata[mask]
+    ydata = ydata[mask]
+
     Sx, Sxx, Sy, Sxy, Sw = support(xdata, ydata, yerr)
     denominator = Sw * Sxx - Sx ** 2
     if denominator == 0:
@@ -101,45 +116,61 @@ def slope(xdata, ydata, yerr=None):
 
 def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
     """
-    Parameters:
-    - model: "linear" or "quadratic" (default is "linear").
+    Fit data to a specified model: linear, quadratic, or exponential.
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
     """
-    # Ensure yerr is iterable
-    if yerr is not None and not hasattr(yerr, '__len__'):
+    if yerr is not None and not hasattr(yerr, "__len__"):
         yerr = np.array([yerr])
 
     # Remove NaN and infinite values
     mask = ~np.isnan(xdata) & ~np.isnan(ydata) & np.isfinite(xdata) & np.isfinite(ydata)
     if yerr is not None:
         mask &= ~np.isnan(yerr) & np.isfinite(yerr)
-    xdata = xdata[mask]
-    ydata = ydata[mask]
+    xdata, ydata = xdata[mask], ydata[mask]
     if yerr is not None:
         yerr = yerr[mask]
 
+    # Define models
     if model == "linear":
         def model_func(x, a, b): return a + b * x
     elif model == "quadratic":
-        def model_func(x, a, b, c): return a + b * x + c * x ** 2
+        def model_func(x, a, b, c): return a + b * x + c * x**2
+    elif model == "exponential":
+        def model_func(x, a, b, c): return a * np.exp(b * x) + c
+    elif model == "exponential_decay":
+        def model_func(x, a, b, c): return a * (1 - np.exp(-b * x + c))
+    elif model == "gaussian":
+        def model_func(x, a, b, c, d): return a * np.exp(-((x - b) / c)**2 /2) + d
     else:
         raise ValueError(f"Unsupported model: {model}")
-    model = Model(model_func)
-    
-    params = model.make_params(a=0, b=1, c=1)
+
+    mode_func = Model(model_func)
+
+    # Set initial parameters
+    if model == "exponential":
+        params = mode_func.make_params(a=np.max(ydata), b=0.2, c=np.min(ydata))
+    elif model == "exponential_decay":
+        params = mode_func.make_params(a=np.max(ydata), b=0.7, c=0)
+    elif model == "gaussian":
+        params = mode_func.make_params(a=np.max(ydata), b=np.mean(xdata), c=1, d=np.min(ydata))
+    else:
+        params = mode_func.make_params(a=0, b=1, c=1)
+
     if constraints:
         for param, value in constraints.items():
             if value is not None:
-                params[param].set(value=value, vary=False) 
+                if isinstance(value, dict):  # Allow setting min/max
+                    params[param].set(**value)
+                else:
+                    params[param].set(value=value, vary=False)
 
+    # Perform the fit
     if yerr is not None:
-        if np.any(np.isnan(yerr)) or np.any(np.isnan(xdata)) or np.any(np.isnan(ydata)):
-            raise ValueError("NaN values detected in input data.")
-        result = model.fit(ydata, params, x=xdata, weights=1.0 / yerr**2)
+        result = mode_func.fit(ydata, params, x=xdata, weights=1.0 / yerr**2)
     else:
-        if np.any(np.isnan(xdata)) or np.any(np.isnan(ydata)):
-            raise ValueError("NaN values detected in input data.")
-        result = model.fit(ydata, params, x=xdata)
+        result = mode_func.fit(ydata, params, x=xdata)
+
+    #print(result.fit_report())
 
     return result
 
@@ -178,14 +209,20 @@ def extract_params(result):
 def calc_R2(result):
     return result.rsquared
 
-def print_result(a, b, da, db, R2, s2):
-    print(f"Steigung {{b}} = {b} \u00B1 {db}")
-    if a != 0 and da != 0:
-        print(f"Achsenabschnitt {{a}} = {a} \u00B1 {da}")
-    print(f"Bestimmtheitsmaß {{R^2}} = {R2}")
-    print(f"Varianz {{s^2}} = {s2}")
-    print()
+def print_fit_summary(result):
+    print("Parameters and their errors:")
+    for param, param_obj in result.params.items():
+        print(f"{param:1}: {param_obj.value:6.4g} ± {param_obj.stderr:8.4g}  ({abs(param_obj.stderr/param_obj.value):.2%})")
 
+    print(f"\nR^2: { result.rsquared}")
+
+    report = result.fit_report()
+    cov_start = report.find("Correlations")
+    if cov_start != -1:
+        print(report[cov_start:])
+    else:
+        print("No covariances found in the fit report.")
+    #print(result.fit_report())
 
 def plot(x, y, dy, a, b, da, db, xlabel="x", ylabel="y", title=None):
     plt.errorbar(x, y, yerr=dy, fmt="kx", capsize=6, capthick=1, label="Datenpunkte")  

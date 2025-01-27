@@ -58,6 +58,8 @@ expr = lambda_**2 + y**2 + z**2 + lambda_*y*z
 
 compute_and_print_error(expr, data, symbol_map)
 
+U, U_0 = sp.symbols('U U_0')
+symbol_map = {'U': 'U', 'U_0': 'U_0'}
+expr = 20 * sp.log(U / U_0) / sp.log(10)
 
-
-
+compute_and_print_error(expr, data, symbol_map)
