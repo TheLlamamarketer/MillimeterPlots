@@ -188,54 +188,83 @@ for key in data['2']:
         result = None
         result2 = None
         if key == 'HP':
-            result = linear_fit(xdata[:10], ydata[:10], dy[:10], model='linear')
-            result2 = 0
-            a = extract_params(result)['a'][0]
-            b = extract_params(result)['b'][0]
-            da = extract_params(result)['a'][1]
-            db = extract_params(result)['b'][1]
-            print(f'm={b}')
-
-            f_c = 10**(-a/b)
-            df_c = f_c * np.log(10) * abs(a/b) * np.sqrt((da/a)**2 + (db/b)**2)
-            print(f'f_c={f_c}')
-            print(f'+ {10**((-a - da)/(b - db)) - f_c}')
-            print(f'- {f_c - 10**((-a + da)/(b + db))}')
-            print(f'\\pm {df_c}')
-
-            f_th = 1/(2*np.pi*data['2']['R']*data['2'][key]['C'])
-            print(f'f_th={f_th}')
+            result = linear_fit(xdata[:8], ydata[:8], dy[:8], model='linear')
+            result2 = max(ydata) + 0.5
+            f_th = 1/(2*np.pi*data['2'][key]['C']*data['2']['R'])
 
         elif key == 'TP':
-            result = linear_fit(xdata[8:-1], ydata[8:-1], dy[8:-1], model='linear')
+            result = linear_fit(xdata[9:], ydata[9:], dy[9:], model='linear')
             result2 = np.mean(ydata[:4])
-            a = extract_params(result)['a'][0]
-            b = extract_params(result)['b'][0]
-            da = extract_params(result)['a'][1]
-            db = extract_params(result)['b'][1]
-            y_mean = np.mean(ydata[:4])
-
-            print(f'm={b}')
-            f_c = 10**((y_mean - a) / b)
-            df_c = f_c/np.log(10) * abs((y_mean - a) / b)* np.sqrt((da / (y_mean - a))**2 + (db / b)**2)
-            print(f'f_c={f_c}')
-            print(f'+{10**((y_mean - a - da) / (b - db)) - f_c}')
-            print(f' {10**((y_mean - a + da) / (b + db)) - f_c}')
-            print(f'\\pm {df_c}')
-
             f_th = (data['2']['R'] + data['2'][key]['R_L'])/(2*np.pi*data['2'][key]['L'])
-            print(f'f_th={f_th}')
 
         elif key == 'BP':
             result = linear_fit(xdata, ydata, dy, model='gaussian')
-            print(f"{print_round_val(extract_params(result)['c'][0], extract_params(result)['c'][1])}")
-            print(f"FWHM: {print_round_val(2*np.sqrt(2*np.log(2))*extract_params(result)['c'][0], 2*np.sqrt(2*np.log(2))*extract_params(result)['c'][1])}")
 
-        #print_fit_summary(result)
-        print('-' * 100)
+        if result2 is not None:
+            a = extract_params(result)['a'][0]
+            b = extract_params(result)['b'][0]
+            da = extract_params(result)['a'][1]
+            db = extract_params(result)['b'][1]
 
-        if key == 'BP' and result is not None:
+            print(f'm={b}')
+            f_c = 10**((result2 - a) / b)
+            df_c = f_c/np.log(10) * abs((result2 - a) / b)* np.sqrt((da / (result2 - a))**2 + (db / b)**2)
+            print(f'f_c={f_c}')
+            print(f'+{10**((result2 - a - da) / (b - db)) - f_c}')
+            print(f' {10**((result2 - a + da) / (b + db)) - f_c}')
+            print(f'\\pm {df_c}')
+            print(f'f_th={f_th}')
+
+            datasets_2.append({
+                'xdata': xdata,
+                'ydata': ydata,
+                'yerr': dy,
+                'fit': (extract_params(result)['a'][0] + extract_params(result)['b'][0] * xdata) if result else None,
+                'fit_error_lines': [(
+                    a + da + (b - db) * xdata,
+                    a - da + (b + db) * xdata
+                )] if result else None,
+                'label': key,
+                'line': 'None',
+                'marker': '.',
+                'color_group': key
+            })
+
+            datasets_2.append({
+                'xdata': xdata[-12:] if key == 'HP' else xdata[:12],
+                'ydata': [result2] * len(xdata[:12]),
+                'line': '-',
+                'marker': None,
+                'label': None,
+                'color_group': key
+            })
+
+            datasets_2.append({
+                'xdata': np.log(f_th)/np.log(10),
+                'ydata': result2 - 10*np.log(2)/np.log(10),
+                'marker': "^",
+                'label': "Theorie",
+            })
+
+        else:
             a, b, c, d = extract_params(result)['a'][0], extract_params(result)['b'][0], extract_params(result)['c'][0], extract_params(result)['d'][0]
+            f_0 = b
+            y_max = a + d
+            f_L = b + c*np.sqrt(-2*np.log(1 -10*np.log(2)/np.log(10)/a))
+            f_H = b - c*np.sqrt(-2*np.log(1 -10*np.log(2)/np.log(10)/a))
+
+
+            f_0_th = 1/(2*np.pi*np.sqrt(data['2'][key]['L']*data['2'][key]['C']))
+            f_L_th = (data['2'][key]['R_L'] + data['2']['R'])/(4*np.pi*data['2'][key]['L']) * (1 - np.sqrt(1 - 4*data['2'][key]['L']/data['2'][key]['C']/(data['2'][key]['R_L'] + data['2']['R'])**2))
+            f_H_th = (data['2'][key]['R_L'] + data['2']['R'])/(4*np.pi*data['2'][key]['L']) * (1 + np.sqrt(1 - 4*data['2'][key]['L']/data['2'][key]['C']/(data['2'][key]['R_L'] + data['2']['R'])**2))
+
+            print(f'f_0={10**f_0}')
+            print(f'f_L={10**f_L}')
+            print(f'f_H={10**f_H}')
+            print(f'f_0_th={f_0_th}')
+            print(f'f_L_th={f_L_th}')
+            print(f'f_H_th={f_H_th}')
+
             datasets_2.append({
                 'xdata': xdata,
                 'ydata': ydata,
@@ -248,46 +277,35 @@ for key in data['2']:
                 'marker': '.',
                 'color_group': key
             })
-        else:
             datasets_2.append({
-                'xdata': xdata,
-                'ydata': ydata,
-                'yerr': dy,
-                'fit': (extract_params(result)['a'][0] + extract_params(result)['b'][0] * xdata) if result else None,
-                'fit_error_lines': [(
-                    extract_params(result)['a'][0] + extract_params(result)['a'][1] + (extract_params(result)['b'][0] - extract_params(result)['b'][1]) * xdata,
-                    extract_params(result)['a'][0] - extract_params(result)['a'][1] + (extract_params(result)['b'][0] + extract_params(result)['b'][1]) * xdata
-                )] if result else None,
-                'label': key,
-                'line': 'None',
-                'marker': '.',
-                'color_group': key
+                'xdata':[f_L, f_H],
+                'ydata': [y_max - 10*np.log(2)/np.log(10), y_max - 10*np.log(2)/np.log(10)],
+                'marker': "^",
+                'label': "BP Fit",
+            })
+            datasets_2.append({
+                'xdata':[np.log(f_L_th)/np.log(10), np.log(f_H_th)/np.log(10)],
+                'ydata': [y_max - 10*np.log(2)/np.log(10), y_max - 10*np.log(2)/np.log(10)],
+                'marker': "^",
+                'label': "Theorie",
             })
 
-        if result2 is not None:
-            datasets_2.append({
-                'xdata': xdata[-12:] if key == 'HP' else xdata[:12],
-                'ydata': [result2] * len(xdata[:12]),
-                'line': '-',
-                'marker': None,
-                'label': None,
-                'color_group': key
-            })
+        print('-' * 100)
 
 
 plot_data(
-    datasets=[datasets_2[0], datasets_2[1]],
+    datasets=[datasets_2[0], datasets_2[1], datasets_2[2]],
     x_label='Frequenz $log_{10}(f)/log_{10}(Hz)$',
     y_label='Spannung $20log_{10}(U)$/db',
     title='Hochpass',
     filename='Plots/WSK_HP.pdf',
     width=25,
     height=20,
-    plot=True,
+    plot=False,
 )
 
 plot_data(
-    datasets=[datasets_2[2], datasets_2[3]],
+    datasets=[datasets_2[3], datasets_2[4], datasets_2[5]],
     x_label='Frequenz $log_{10}(f)/log_{10}(Hz)$',
     y_label='Spannung $20log_{10}(U)$/db',
     title='Tiefpass',
@@ -295,11 +313,11 @@ plot_data(
     ymax = 0,
     width=25,
     height=20,
-    plot=False,
+    plot=True,
 )
 
 plot_data(
-    datasets=[datasets_2[-1]],
+    datasets=[datasets_2[-3], datasets_2[-2], datasets_2[-1]],
     x_label='Frequenz $log_{10}(f)/log_{10}(Hz)$',
     y_label='Spannung $20log_{10}(U)$/db',
     title='Bandpass',

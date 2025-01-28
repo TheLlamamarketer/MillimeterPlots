@@ -186,8 +186,13 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
         if color is None:
             color = colors[id(data)]
 
-        if len(xdata) == 0 or len(ydata) == 0:
+        if xdata is None or ydata is None or (not isinstance(xdata, (list, np.ndarray, float))) or (not isinstance(ydata, (list, np.ndarray, float))):
             continue
+
+        if isinstance(xdata, float):
+            xdata = [xdata]
+        if isinstance(ydata, float):
+            ydata = [ydata]
         
         if isinstance(xdata[0], str):
             xdata = np.array(range(len(xdata)))
