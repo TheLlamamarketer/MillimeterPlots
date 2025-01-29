@@ -146,6 +146,47 @@ def plot_grid(ax, width, height, bg_hex, xstep, xtickoffset, xmin, xmax, ystep, 
 
     return
 
+def plot_color_seeds(seed_range=(100, 120), num_datasets=3, bg_hex='#FFFFFF', hue_range=0.05):
+    """
+    Visualize how different color seeds affect color assignment.
+    - X-axis: Different `color_seed` values.
+    - Y-axis: Different datasets (color groups).
+    - Colors: Generated colors for each dataset with the given seed.
+    """
+    min_seed, max_seed = seed_range
+    seeds = range(min_seed, max_seed + 1)
+    
+    # Generate dummy datasets (each assigned a color group)
+    datasets = [{"color_group": f"group_{i}"} for i in range(num_datasets)]
+
+    fig, ax = plt.subplots(figsize=(len(seeds) * 0.4, num_datasets * 0.8), constrained_layout=True)
+    
+    # Plot colors
+    for col, seed in enumerate(seeds):
+        # Generate colors for all datasets at once
+        colors = colors_from_groups(datasets, color_seed=seed, bg_hex=bg_hex, hue_range=hue_range)
+
+        for row, dataset in enumerate(datasets):
+            color = colors[id(dataset)]  # Extract the color for the dataset
+            ax.add_patch(plt.Rectangle((col, row), 1, 1, color=color))
+
+    # Formatting
+    ax.set_xticks(np.arange(len(seeds)) + 0.5)
+    ax.set_xticklabels(seeds, rotation=45, fontsize=10)
+    ax.set_yticks(np.arange(num_datasets) + 0.5)
+    ax.set_yticklabels([f"Dataset {i+1}" for i in range(num_datasets)], fontsize=10)
+
+    ax.set_xlabel("Color Seed", fontsize=12)
+    ax.set_ylabel("Dataset", fontsize=12)
+    ax.set_title("Color Variations Across Seeds", fontsize=14)
+
+    ax.set_xlim(0, len(seeds))
+    ax.set_ylim(0, num_datasets)
+    ax.invert_yaxis()  # Align first dataset at the top
+    ax.set_frame_on(False)
+    
+    plt.show()
+
 
 def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
               legend_position='best', color_seed=203, width=20, height=28,
