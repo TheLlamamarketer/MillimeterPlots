@@ -46,6 +46,7 @@ data = {
 }
 
 
+
 def last_digit(num, n=1):
     if isinstance(num, np.ndarray):
         return np.vectorize(last_digit)(num, n)
@@ -72,6 +73,24 @@ data['1']['U'] = data['1']['U'][sorted_indices]
 
 char_mask = data['1']['t'] <= 8.8
 dischar_mask = data['1']['t'] >= 8.8
+
+
+header_groups = [('Aufladung', 2), ('Entladung', 2)]
+headers = {'t_A': {'label': '{Zeit $t/ms$}', 'err': 0.1, 'data': data['1']['t'][char_mask]},
+            'U_A': {'label': '{Spannung $U/V$}', 'err': 0.05, 'data': data['1']['U'][char_mask]},
+            't_E': {'label': '{Zeit $t/ms$}', 'err': 0.1, 'data': data['1']['t'][dischar_mask]},
+            'U_E': {'label': '{Spannung $U/V$}', 'err': 0.05, 'data': data['1']['U'][dischar_mask]}
+}
+
+print_standard_table(
+    data=data['1'],
+    headers=headers,
+    header_groups=header_groups,
+    column_formats= ["2.1"] * len(headers),
+    caption="d",
+    label="tab:A1",
+    show=True
+)
 
 print('-' * 100)
 
@@ -185,8 +204,30 @@ plot_data(
 print('-' * 100)
 
 datasets_2 = []
+headers = {'HP_f':{}, 'HP_U':{}, 'TP_f':{}, 'TP_U':{}, 'BP_f':{}, 'BP_U':{}}
+
+'''
+'HP': {
+    'f': np.array([10.04, 25.84, 40.10, 50.11, 100.15, 250.0, 500, 1.0015e3, 1.508e3, 2.0077e3, 3.0001e3, 3.5015e3, 5.0503e3, 7.5020e3, 10.093e3, 15.083e3, 25.05e3]),
+    'U_0': np.array([0.79e3, 0.804e3, 0.805e3, 0.804e3, 0.799e3, 0.768e3, 0.681e3, 499.3, 376.7, 299.8, 213, 186, 134.4, 94.1, 71.3, 47.6, 25.2]),
+    'U': np.array([1.5, 3.8, 5.8, 7.3, 14.4, 34.2, 60.4, 87.4, 97.1, 100, 99, 96.9, 88, 73.3, 60.4, 43, 23.5]),
+    'df': np.array([0.01, 0.01, 0.01, 0.01, 0.1, 0.1, 0.05, 0.001e3, 0.0001e3, 0.0001e3, 0.0001e3, 0.0001e3, 0.0001e3, 0.0001e3, 0.0001e3, 0.0001e3, 0.1e3]),
+    'dU': np.array([0.2023, 0.2057, 0.2087, 0.2109, 0.2216, 0.2513, 0.2906, 0.3311, 0.3457, 0.3500, 0.3485, 0.3454, 0.3320, 0.3100, 0.2906, 0.2645, 0.2353]),
+    'dU_0': np.array([10, 3.2060, 3.2075, 3.2060, 3.1985, 3.1520, 3.0215, 0.9489, 0.7651, 0.6497, 2.3195, 2.2790, 0.4016, 0.3412, 0.3070, 0.2714, 0.2378]),
+    'C': 3.354e-6, 'dC': 0.026478e-6,
+},
+'''
+
 for key in data['2']:
     if isinstance(data['2'][key], dict):
+        U = data['2'][key]['U']
+        dU = data['2'][key]['dU']
+        U_0 = data['2'][key]['U_0']
+        dU_0 = data['2'][key]['dU_0']
+
+        headers[key + '_f'] = {'label': '{$f$/Hz}', 'data': data['2'][key]['f']}
+        headers[key + '_U'] = {'label': '{$U/U_0$}', 'err': U/U_0 * np.sqrt((dU/U)**2 + (dU_0/U_0)**2), 'data': U/U_0}
+
         xdata = np.log(data['2'][key]['f'])/np.log(10)
         ydata = 20*np.log(data['2'][key]['U']/data['2'][key]['U_0'])/np.log(10)
 
@@ -212,10 +253,7 @@ for key in data['2']:
             result = linear_fit(xdata, ydata, dy, model='gaussian')
 
         if result2 is not None:
-            a = extract_params(result)['a'][0]
-            b = extract_params(result)['b'][0]
-            da = extract_params(result)['a'][1]
-            db = extract_params(result)['b'][1]
+            a, da, b, db = extract_params(result)['a'][0], extract_params(result)['a'][1], extract_params(result)['b'][0], extract_params(result)['b'][1]
 
             print(f'$m_{key}={print_round_val(b, db, False)}$')
             f_c = 10**((result2 - a) / b)
@@ -271,16 +309,16 @@ for key in data['2']:
             f_H_th = (data['2'][key]['R_L'] + data['2']['R'])/(4*np.pi*data['2'][key]['L']) * (1 + np.sqrt(1 - 4*data['2'][key]['L']/data['2'][key]['C']/(data['2'][key]['R_L'] + data['2']['R'])**2))
 
             print(f'f_0={print_round_val(10**f_0, 10**f_0*np.log(10) * db)}Hz, f_0_th={print_round_val(f_0_th)}Hz')
-            print(f'f_L={10**f_L}Hz')
-            print(f'f_H={10**f_H}Hz')
+            print(f'f_L={print_round_val(10**f_L, 10**f_L*np.log(10) * df_L)}Hz')
+            print(f'f_H={print_round_val(10**f_H, 10**f_H*np.log(10) * df_H)}Hz')
 
             datasets_2.append({
                 'xdata': xdata,
                 'ydata': ydata,
                 'yerr': dy,
                 'fit': a * np.exp(-((np.linspace(xdata.min(), xdata.max(), 300) - b) / c)**2/2) + d,
-                'fit_error_lines': None,
                 'fit_xdata': np.linspace(xdata.min(), xdata.max(), 300),
+                'confidence': calc_CI(result, np.linspace(xdata.min(), xdata.max(), 300)),
                 'label': key,
                 'line': 'None',
                 'marker': '.',
@@ -294,6 +332,21 @@ for key in data['2']:
                 'label': "BP Fit",
             })
         print('-' * 100)
+
+
+header_groups = [('Hochpass', 2), ('Tiefpass', 2), ('Bandpass', 2)]
+
+
+
+print_standard_table(
+    data=data['2'],
+    headers=headers,
+    header_groups=header_groups,
+    column_formats= ["2.1"] * len(headers),
+    caption="Kennlinien für die verschiedenen Materialien. Die Spannung $U$ und Stromstärke $I$ wurden noch nicht auf die maximalen Werte normiert.",
+    label="tab:A2",
+    show=False
+)
 
 
 plot_data(
@@ -334,4 +387,4 @@ plot_data(
     plot=False,
 )
 
-plot_color_seeds((0,50), 2)
+#plot_color_seeds((0,50), 2)
