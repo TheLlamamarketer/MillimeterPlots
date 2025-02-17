@@ -41,7 +41,7 @@ data0 = {
 
 data0["l"] = [val/100 for val in data0["l"]]
 
-result0 = linear_fit(data0["l"], data0["alpha"], yerr=0.5)
+result0 = lmfit(data0["l"], data0["alpha"], yerr=0.5)
 params0 = extract_params(result0)
 
 print(f"Steigung: {round_val(params0['b'][0], params0['b'][1], False)[0]} \\pm {round_val(params0['b'][0], params0['b'][1], False)[1]}")
@@ -131,7 +131,7 @@ for i in range(4):
     dataN['Angle0'] = dataN["Angle"][(dataN["Angle"] <= 22 + zero_angle) & (dataN["Angle"] >= -22 + zero_angle)]
     index0 = np.isin(dataN["Angle"], dataN["Angle0"])
     dataN["light0"] = dataN["light"][index0]
-    dataN['results0'] = linear_fit(dataN["Angle0"], dataN["light0"], model="quadratic")
+    dataN['results0'] = lmfit(dataN["Angle0"], dataN["light0"], model="quadratic")
     dataN['params0'] = extract_params(dataN['results0'])
 
     print("Fit0:", -dataN["params0"]['b'][0] / (2 * dataN["params0"]['c'][0]),
@@ -145,7 +145,7 @@ for i in range(4):
     dy = data["dAngle"]
 
     dataN["x"][:np.where(dataN["x"] == dataN["x"].min())[0][0]] *= -1
-    results1 = linear_fit(dataN["x"], dataN["y"], dy)
+    results1 = lmfit(dataN["x"], dataN["y"], dy)
     params1 = extract_params(results1)
 
     dataN["y2"] = dataN["y"][(dataN["y"] <= 22 + params1['a'][0]) & (dataN["y"] >= -22 + params1['a'][0])]
@@ -156,7 +156,7 @@ for i in range(4):
     index_min2 = np.where(dataN["x2"] == dataN["x2"].min())[0][0]
     dataN["x2"][:index_min2] *= -1
 
-    dataN["results"] = linear_fit(dataN["x2"], dataN["y2"], yerr = dataN["dlight"])
+    dataN["results"] = lmfit(dataN["x2"], dataN["y2"], yerr = dataN["dlight"])
     dataN["params"] = extract_params(dataN["results"])
 
     print("Fit:", dataN["params"]['a'][0], dataN["params"]['a'][1], calc_R2(dataN["results"]))
@@ -407,12 +407,12 @@ dc_exp_3 = c_exp_3 * np.sqrt((dm/m_sug)**2 + (dV/V_wat)**2)
 
 
 
-result3 = linear_fit(alphas, concentration_th, dconcentration_th, constraints={"a": 0})
+result3 = lmfit(alphas, concentration_th, dconcentration_th, constraints={"a": 0})
 params3 = extract_params(result3)
 
 
-result4_2 = linear_fit(alphas, c_exp_2, constraints={"a": 0})
-result4_3 = linear_fit(alphas, c_exp_3, constraints={"a": 0})
+result4_2 = lmfit(alphas, c_exp_2, constraints={"a": 0})
+result4_3 = lmfit(alphas, c_exp_3, constraints={"a": 0})
 
 
 x = np.linspace(alphas.min(), alphas.max(), 300)

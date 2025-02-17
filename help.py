@@ -17,6 +17,18 @@ def LastSignificant(x):
     fractional_part = str(d).split('.')[-1] if '.' in str(d) else ''
     return len(fractional_part)
 
+def last_digit(num):
+    if isinstance(num, np.ndarray):
+        return np.vectorize(last_digit)(num)
+    elif isinstance(num, (int, float, Decimal)):
+        if isinstance(num, (float, Decimal)):
+            return round(10**-LastSignificant(num), LastSignificant(num))
+        else: 
+            return 1
+    else:
+        raise TypeError("Input must be an int, float, Decimal or np.ndarray")
+
+
 def round_val(val, err=0, intermed=True):
     if val == 0:
         return 0, err
@@ -44,35 +56,24 @@ def print_round_val(val, err=0, intermed=True):
         rounded_val, rounded_err, _ = round_val(val, err, intermed=intermed)
         return f"{rounded_val} \\pm {rounded_err}"
 
-def support(xdata, ydata, yerr=None):
-    if yerr is None:
-        # Unweighted sums
-        n = len(xdata)
-        Sx = np.sum(xdata)
-        Sy = np.sum(ydata)
-        Sxx = np.sum(xdata * xdata)
-        Sxy = np.sum(xdata * ydata)
-        Sw = n  
-    else:
-        if np.any(yerr == 0):
-            raise ValueError("Zero error encountered in yerr. Cannot perform weighted regression with zero errors.")
-        weights = 1.0 / (yerr ** 2)
-        Sx = np.sum(weights * xdata)
-        Sy = np.sum(weights * ydata)
-        Sxx = np.sum(weights * xdata * xdata)
-        Sxy = np.sum(weights * xdata * ydata)
-        Sw = np.sum(weights)
+def calc_sums(xdata, ydata, weights):
+    Sx = np.sum(weights * xdata)
+    Sy = np.sum(weights * ydata)
+    Sxx = np.sum(weights * xdata * xdata)
+    Sxy = np.sum(weights * xdata * ydata)
+    Sw = np.sum(weights)
     return Sx, Sxx, Sy, Sxy, Sw
 
 def slope(xdata, ydata, yerr=None):
-    mask = ~np.isnan(xdata) & ~np.isnan(ydata) & np.isfinite(xdata) & np.isfinite(ydata)
-    if yerr is not None:
-        mask &= ~np.isnan(yerr) & np.isfinite(yerr)
-        yerr = yerr[mask]
+    if yerr is None: yerr = np.ones_like(ydata)
+    mask = ~np.isnan(xdata) & ~np.isnan(ydata) & ~np.isnan(yerr) & np.isfinite(xdata) & np.isfinite(ydata) & np.isfinite(yerr)
+    yerr = yerr[mask]
     xdata = xdata[mask]
     ydata = ydata[mask]
 
-    Sx, Sxx, Sy, Sxy, Sw = support(xdata, ydata, yerr)
+    weights = np.where(yerr == 0, 0, 1.0 / (yerr ** 2))
+
+    Sx, Sxx, Sy, Sxy, Sw = calc_sums(xdata, ydata, weights)
     denominator = Sw * Sxx - Sx ** 2
     if denominator == 0:
         raise ValueError("Denominator is zero; cannot compute slope and intercept.")
@@ -80,41 +81,23 @@ def slope(xdata, ydata, yerr=None):
     b = (Sw * Sxy - Sx * Sy) / denominator
     a = (Sxx * Sy - Sx * Sxy) / denominator
 
-    # Calculate errors in slope and intercept
-    if yerr is None:
-        # Unweighted case
-        n = len(xdata)
-        residuals = ydata - (a + b * xdata)
-        variance = np.sum(residuals ** 2) / (n - 2)
-        sb = np.sqrt(variance * Sw / denominator)
-        sa = np.sqrt(variance * Sxx / denominator)
-    else:
-        # Weighted case
-        weights = 1.0 / (yerr ** 2)
-        residuals = ydata - (a + b * xdata)
-        variance = np.sum(weights * residuals ** 2) / (Sw - 2)
-        sb = np.sqrt(variance * Sw / denominator)
-        sa = np.sqrt(variance * Sxx / denominator)
+    residuals = ydata - (a + b * xdata)
+    variance = np.sum(weights * residuals ** 2) / (Sw - 2)
+    db = np.sqrt(variance * Sw / denominator)
+    da = np.sqrt(variance * Sxx / denominator)
 
-    # Coefficient of determination R^2
-    if yerr is None:
-        y_mean = np.mean(ydata)
-        total_variance = np.sum((ydata - y_mean) ** 2)
-        explained_variance = np.sum((a + b * xdata - y_mean) ** 2)
-    else:
-        y_mean = np.sum(weights * ydata) / Sw
-        total_variance = np.sum(weights * (ydata - y_mean) ** 2)
-        explained_variance = np.sum(weights * (a + b * xdata - y_mean) ** 2)
+    y_mean = np.sum(weights * ydata) / Sw
+    total_variance = np.sum(weights * (ydata - y_mean) ** 2)
+    explained_variance = np.sum(weights * (a + b * xdata - y_mean) ** 2)
 
     if total_variance == 0:
         R2 = 1.0
     else:
         R2 = explained_variance / total_variance
 
+    return a, da, b, db, R2, variance
 
-    return a, sa, b, sb, R2, variance
-
-def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
+def lmfit(xdata, ydata, yerr=None, model="linear", constraints=None, const_weight=1):
     """
     Fit data to a specified model: linear, quadratic, or exponential.
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
@@ -126,35 +109,24 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
     mask = ~np.isnan(xdata) & ~np.isnan(ydata) & np.isfinite(xdata) & np.isfinite(ydata)
     if yerr is not None:
         mask &= ~np.isnan(yerr) & np.isfinite(yerr)
-    xdata, ydata = xdata[mask], ydata[mask]
-    if yerr is not None:
         yerr = yerr[mask]
+    xdata, ydata = xdata[mask], ydata[mask]
 
-    # Define models
-    if model == "linear":
-        def model_func(x, a, b): return a + b * x
-    elif model == "quadratic":
-        def model_func(x, a, b, c): return a + b * x + c * x**2
-    elif model == "exponential":
-        def model_func(x, a, b, c): return a * np.exp(b * x) + c
-    elif model == "exponential_decay":
-        def model_func(x, a, b, c): return a * (1 - np.exp(-b * x + c))
-    elif model == "gaussian":
-        def model_func(x, a, b, c, d): return a * np.exp(-((x - b) / c)**2 /2) + d
-    else:
-        raise ValueError(f"Unsupported model: {model}")
+    # Define models and initial parameters
+    models = {
+        "linear": (lambda x, a, b: a + b * x, {"a": 0, "b": 1}),
+        "quadratic": (lambda x, a, b, c: a + b * x + c * x**2, {"a": 0, "b": 1, "c": 1}),
+        "exponential": (lambda x, a, b, c: a * np.exp(b * x) + c, {"a": np.max(ydata), "b": 0.2, "c": np.min(ydata)}),
+        "exponential_decay": (lambda x, a, b, c: a * (1 - np.exp(-b * x + c)), {"a": np.max(ydata), "b": 0.7, "c": 0}),
+        "gaussian": (lambda x, a, b, c, d: a * np.exp(-((x - b) / c)**2 / 2) + d, {"a": np.max(ydata), "b": np.mean(xdata), "c": 1, "d": np.min(ydata)})
+    }
 
+    if model not in models:
+        raise ValueError(f"Unrecognized model: {model}")
+
+    model_func, init_params = models[model]
     mode_func = Model(model_func)
-
-    # Set initial parameters
-    if model == "exponential":
-        params = mode_func.make_params(a=np.max(ydata), b=0.2, c=np.min(ydata))
-    elif model == "exponential_decay":
-        params = mode_func.make_params(a=np.max(ydata), b=0.7, c=0)
-    elif model == "gaussian":
-        params = mode_func.make_params(a=np.max(ydata), b=np.mean(xdata), c=1, d=np.min(ydata))
-    else:
-        params = mode_func.make_params(a=0, b=1, c=1)
+    params = mode_func.make_params(**init_params)
 
     if constraints:
         for param, value in constraints.items():
@@ -164,9 +136,11 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
                 else:
                     params[param].set(value=value, vary=False)
 
-    # Perform the fit
+
     if yerr is not None:
-        result = mode_func.fit(ydata, params, x=xdata, weights=1.0 / yerr**2)
+        weights = np.where(yerr == 0, 0, 1.0 / yerr**2)
+        w = sum(weights)/len(weights)
+        result = mode_func.fit(ydata, params, x=xdata, weights=weights + const_weight/w)
     else:
         result = mode_func.fit(ydata, params, x=xdata)
 
@@ -174,7 +148,7 @@ def linear_fit(xdata, ydata, yerr=None, model="linear", constraints=None):
 
     return result
 
-def calc_CI(result, xdata, sigmas=[1, 2]):
+def calc_CI(result, xdata, sigmas=[1]):
     """
     Calculate confidence intervals for the fit using eval_uncertainty.
     Returns:

@@ -144,26 +144,15 @@ data = {
 }
 
 
-def last_digit(num, n=1):
-    if isinstance(num, np.ndarray):
-        return np.vectorize(last_digit)(num, n)
-    elif isinstance(num, (int, float, Decimal)):
-        if isinstance(num, (float, Decimal)):
-            return round(n * 10**-LastSignificant(num), LastSignificant(num))
-        else: 
-            return n
-    else:
-        raise TypeError("Input must be an int, float, Decimal or np.ndarray")
-
 
 def calc_dU(U):
-    return np.array(U, dtype=float) * 0.0015 + last_digit(U, 2)
+    return np.array(U, dtype=float) * 0.0015 + 2* last_digit(U)
 
 def calc_dI(I):
-    return np.array(I, dtype=float) * 0.012 + last_digit(I, 3)
+    return np.array(I, dtype=float) * 0.012 + 3* last_digit(I)
 
 def calc_dR(R):
-    return np.array(R, dtype=float) * 0.009 + last_digit(R, 2)
+    return np.array(R, dtype=float) * 0.009 + 2* last_digit(R)
 
 
 # Convert lists to numpy arrays

@@ -129,7 +129,7 @@ dxy = [abs(xy[i]) * np.sqrt(
 fits = []
 plot_datasets = []
 for i in range(len(datasets)):
-    result = linear_fit(np.arange(len(datasets[i]['xdata'])), xy[i], dxy[i], model="linear")
+    result = lmfit(np.arange(len(datasets[i]['xdata'])), xy[i], dxy[i], model="linear")
 
     params = extract_params(result)
     b, db = params['b']
@@ -185,7 +185,7 @@ for i in range(max_length):
     ldx_low = lx - np.log(xdata - xerr)
     ldy = yerr / ydata  
 
-    result = linear_fit(lx, ly, ldy, model="linear")
+    result = lmfit(lx, ly, ldy, model="linear")
     high_res_x = np.linspace(lx.min(), lx.max(), 300)
     fit = result.eval(x=high_res_x)
     confidence = calc_CI(result, high_res_x)
@@ -222,7 +222,7 @@ log_yerr_avg_up = np.log(ydata_avg + yerr_avg) - log_ydata_avg
 log_yerr_avg_low = log_ydata_avg - np.log(ydata_avg - yerr_avg)
 log_yerr_avg = np.average([log_yerr_avg_up, log_yerr_avg_low], axis=0)
 
-log_result_avg = linear_fit(log_xdata_avg, log_ydata_avg, log_yerr_avg, model="linear")
+log_result_avg = lmfit(log_xdata_avg, log_ydata_avg, log_yerr_avg, model="linear")
 log_high_res_x_avg = np.linspace(log_xdata_avg.min(), log_xdata_avg.max(), 300)
 log_fit_avg = log_result_avg.eval(x=log_high_res_x_avg)
 log_confidence_avg = calc_CI(log_result_avg, log_high_res_x_avg)

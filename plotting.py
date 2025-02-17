@@ -189,7 +189,7 @@ def plot_color_seeds(seed_range=(100, 120), num_datasets=3, bg_hex='#FFFFFF', hu
 
 
 def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
-              legend_position='best', color_seed=203, width=20, height=28,
+              legend_position='best', color_seed=203, width=20, height=20,
               plot=True, ymax=None, ymin=None, xmax=None, xmin=None, xticks=None, yticks=None, bg_hex='#FFFFFF'):
     
     fig, ax = plt.subplots(figsize=(width/2.54, height/2.54), constrained_layout=True)
@@ -207,25 +207,19 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
     for data in datasets:
         xdata = data.get('xdata', [])
         ydata = np.array(data.get('ydata', []), dtype=float)
-
         y_error = data.get('yerr')
         x_error = data.get('xerr')
-
         label = data.get('label')
-
-        marker = data.get('marker', 'x')
+        marker = data.get('marker', '.')
         line = data.get('line', 'None')
-        confidence = data.get('confidence', {})
+        confidence = data.get('confidence')
         confidence_label = data.get('confidence_label', True)
-        fit = data.get('fit', None)
+        fit = data.get('fit')
         fit_label = data.get('fit_label', True)
-        fit_xdata = data.get('fit_xdata', None)
+        fit_xdata = data.get('fit_xdata')
         fit_line = data.get('fit_line', '-')
-        fit_error_lines = data.get('fit_error_lines', None)
-
-        color = data.get('color')
-        if color is None:
-            color = colors[id(data)]
+        fit_error_lines = data.get('fit_error_lines')
+        color = data.get('color', colors[id(data)] )
 
         if xdata is None or ydata is None or (not isinstance(xdata, (list, np.ndarray, float))) or (not isinstance(ydata, (list, np.ndarray, float))):
             continue
@@ -243,7 +237,7 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
             xdata = np.array(xdata, dtype=float)
 
 
-        if confidence:
+        if confidence is not None:
             try:
                 for i, (lower, upper) in enumerate(confidence):
                     if lower is not None and upper is not None:

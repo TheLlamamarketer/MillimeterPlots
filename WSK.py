@@ -1,4 +1,3 @@
-from matplotlib.pylab import f
 import numpy as np
 from plotting import plot_data, plot_color_seeds
 from tables import *
@@ -89,17 +88,17 @@ print_standard_table(
     column_formats= ["2.1"] * len(headers),
     caption="d",
     label="tab:A1",
-    show=True
+    show=False
 )
 
 print('-' * 100)
 
 print(f'$\\tau_{{th}}={print_round_val(10**3*data["1"]["R"]*data["1"]["C"], 10**3*np.sqrt((data["1"]["C"]*data["1"]["dR"])**2 + (data["1"]["R"]*data["1"]["dC"])**2))}ms$')
 
-result_1 = linear_fit(data['1']['t'][char_mask], data['1']['U'][char_mask], model='exponential_decay', constraints={"a": {"min": 0}, "b": {"min": 0}})
+result_1 = lmfit(data['1']['t'][char_mask], data['1']['U'][char_mask], model='exponential_decay', constraints={"a": {"min": 0}, "b": {"min": 0}})
 print(f'$\\tau_{{Auf}}={print_round_val(1/extract_params(result_1)["b"][0], extract_params(result_1)["b"][1]/extract_params(result_1)["b"][0]**2)} \\ ms$')
 
-result_2 = linear_fit(data['1']['t'][dischar_mask]-8.8, data['1']['U'][dischar_mask], model='exponential', constraints={"a": {"min": 0}, "c":0})
+result_2 = lmfit(data['1']['t'][dischar_mask]-8.8, data['1']['U'][dischar_mask], model='exponential', constraints={"a": {"min": 0}, "c":0})
 print(f'$\\tau_{{Ent}}={print_round_val(-1/extract_params(result_2)["b"][0], extract_params(result_2)["b"][1]/extract_params(result_2)["b"][0]**2)} \\ ms$')
 
 plot_data(
@@ -138,7 +137,13 @@ plot_data(
     plot=False,
 )
 
+
+
+
+
+    
 datasets = []
+
 
 for mask in [char_mask, dischar_mask]:
     if mask is char_mask:
@@ -167,12 +172,12 @@ for mask in [char_mask, dischar_mask]:
             np.log(np.clip(1 - (U + 0.05)/max(data['1']['U'][mask]), 1e-3, None)) - U_norm, 
             np.log(np.clip(1 - (U - 0.05)/max(data['1']['U'][mask]), 1e-3, None)) - U_norm
             )
-        result = linear_fit(t, U_norm, 0.05 / (U - max(data['1']['U'][mask])), model='linear')
+        result = lmfit(t, U_norm, 0.05 / (U - max(data['1']['U'][mask])), model='linear', const_weight=100)
     else:
         yerr = (
             np.log(np.clip((U - 0.05)/U, 1e-2, None)), 
             np.log(np.clip((U + 0.05)/U, 1e-2, None)))
-        result = linear_fit(t, U_norm, 0.05 / U, model='linear')
+        result = lmfit(t, U_norm, 0.05 / U, model='linear', const_weight=100)
 
     datasets.append({
         'xdata': t,
@@ -182,10 +187,11 @@ for mask in [char_mask, dischar_mask]:
         'fit': extract_params(result)['a'][0] + extract_params(result)['b'][0] * t,
         'confidence': calc_CI(result, t),
         'label': 'Aufladung' if mask is char_mask else 'Entladung',
-        'marker': '.',
     })
 
     print(f"${'\\tau_{Auf}' if mask is char_mask else '\\tau_{Ent}'}: {print_round_val(-1/extract_params(result)['b'][0], extract_params(result)['b'][1]/extract_params(result)['b'][0]**2)} \\ ms$")
+
+
 
 plot_data(
     datasets=datasets,
@@ -199,6 +205,84 @@ plot_data(
     color_seed=39,
     plot=False,
 )
+
+def fit(y1, y2, x1, x2, dy1=None, dy2=None):
+    y1_mean = np.mean(y1)
+    y2_mean = np.mean(y2)
+    y = np.concatenate([y1, y2])
+    y_mean = np.mean(y)
+    n1 = len(y1)
+    n2 = len(y2)
+    n = n1 + n2
+
+    x1_mean = np.mean(x1)
+    x2_mean = np.mean(x2)
+    x = np.concatenate([x1, x2])
+    x_mean = np.mean(x)
+
+    weights = np.concatenate([1/dy1[0]**2, 1/dy2[0]**2]) if dy1 is not None and dy2 is not None else np.ones(len(y1) + len(y2))
+    Sxx = np.sum(weights * (x - x_mean)**2)
+    Sxy = np.sum(weights * (x - x_mean) * (y - y_mean))
+    Sw = np.sum(weights)
+    Syy = np.sum(weights * (y - y_mean)**2)
+
+    b = Sxy/Sxx
+    a1 = y1_mean - b * x1_mean
+    a2 = y2_mean - b * x2_mean
+    a = y_mean - b * x_mean
+
+    r = Sxy / np.sqrt(Sxx * Syy)
+    d = np.sqrt((1 - r**2) * Syy / (n - 2))
+    da = d * np.sqrt(1/Sw + x_mean**2/Sxx)
+    db = d / np.sqrt(Sxx)
+    dab = -d * x_mean / Sxx
+
+
+    return a1, a2, b, da, db, dab
+
+def calc_CI_normal(fit, xdata, da, db, dab, sigmas=[3]):
+    ci_list = []
+    try:
+        for sigma in sigmas:
+            # Calculate uncertainty at the given sigma level
+            uncertainty = sigma * np.sqrt(da**2 + (xdata * db)**2 + 2 * xdata * dab)
+            lower = fit - uncertainty
+            upper = fit + uncertainty
+
+            ci_list.append((lower, upper))
+    except Exception as e:
+        import logging
+        logging.error(f"Error calculating confidence intervals: {e}")
+        for sigma in sigmas:
+            ci_list.append((np.full_like(xdata, np.nan), np.full_like(xdata, np.nan)))
+    return ci_list
+
+
+
+y = tuple(dataset['ydata'] for dataset in datasets)
+x = tuple(dataset['xdata'] for dataset in datasets)
+dy = tuple(dataset['yerr'] for dataset in datasets)
+a1, a2, b, da, db, dab = fit(*y, *x, *dy)
+
+for dataset in datasets:
+    fit = a1 + b * dataset['xdata'] if dataset['label'] == 'Aufladung' else a2 + b * dataset['xdata']
+    dataset['fit'] = fit
+    dataset['confidence'] = calc_CI_normal(fit, dataset['xdata'], da, db, dab)
+
+plot_data(
+    datasets=datasets,
+    x_label='Zeit $t$/ms',
+    y_label='ln$(1 - U/U_{max})$ bzw. ln$(U/U_{max})$',
+    title='Auf und Entladung Kondensator',
+    filename='Plots/WSK_2b.pdf',
+    ymin=-5,
+    width=25,
+    height=20,
+    color_seed=39,
+    plot=False,
+)
+
+
 
 
 print('-' * 100)
@@ -238,19 +322,19 @@ for key in data['2']:
         result = None
         result2 = None
         if key == 'HP':
-            result = linear_fit(xdata[:8], ydata[:8], dy[:8], model='linear')
+            result = lmfit(xdata[:8], ydata[:8], dy[:8], model='linear')
             result2 = max(ydata) + 0.5
             f_th = 1/(2*np.pi*data['2'][key]['C']*data['2']['R'])
             df_th = f_th * np.sqrt((data['2'][key]['dC']/data['2'][key]['C'])**2 + (data['2']['dR']/data['2']['R'])**2)
 
         elif key == 'TP':
-            result = linear_fit(xdata[9:], ydata[9:], dy[9:], model='linear')
+            result = lmfit(xdata[9:], ydata[9:], dy[9:], model='linear')
             result2 = np.mean(ydata[:4])
             f_th = (data['2']['R'] + data['2'][key]['R_L'])/(2*np.pi*data['2'][key]['L'])
             df_th = 1/(2*np.pi*data['2'][key]['L'])*np.sqrt(data['2']['dR']**2 + data['2'][key]['dR_L']**2 + (data['2'][key]['dL']*(data['2']['R'] + data['2'][key]['R_L']))**2)
 
         elif key == 'BP':
-            result = linear_fit(xdata, ydata, dy, model='gaussian')
+            result = lmfit(xdata, ydata, dy, model='gaussian')
 
         if result2 is not None:
             a, da, b, db = extract_params(result)['a'][0], extract_params(result)['a'][1], extract_params(result)['b'][0], extract_params(result)['b'][1]
