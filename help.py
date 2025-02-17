@@ -81,8 +81,10 @@ def slope(xdata, ydata, yerr=None):
     b = (Sw * Sxy - Sx * Sy) / denominator
     a = (Sxx * Sy - Sx * Sxy) / denominator
 
+    n = Sw**2 / np.sum(weights**2)
+
     residuals = ydata - (a + b * xdata)
-    variance = np.sum(weights * residuals ** 2) / (Sw - 2)
+    variance = np.sum(weights * residuals ** 2) / (n - 2)
     db = np.sqrt(variance * Sw / denominator)
     da = np.sqrt(variance * Sxx / denominator)
 
