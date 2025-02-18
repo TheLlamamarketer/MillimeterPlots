@@ -5,7 +5,7 @@ from help import *
 
 
 data = {
-    'dI_S': [0.0005], 'dT': [0.5], 'd': 20e-3,
+    'dI_S': [0.0005], 'dT': [0.5], 'd': 1e-3,
     '1':{
         'a':{
             'U_H': ['7.670', '8.929', '10.083', '11.199', '12.427', '13.674', '15.059', '16.274', '17.613', '18.988', '20.167', '21.450', '22.805', '24.020', '25.270'], 'U_H_0': ['-1.280'],
@@ -28,7 +28,7 @@ data = {
 
 
 def calc_dU(U):
-    return np.array(U, dtype=float) * 0.004 + 1* last_digit(U)
+    return np.array(U, dtype=float) * 0.004 + 5* last_digit(U)
 
 def calc_dI_B(I_B):
     return np.array(I_B, dtype=float) * 0.008 + 5* last_digit(I_B)
@@ -52,17 +52,44 @@ for key in data['1']:
     data['1'][key]['I_S'] = np.array(I_S/1000, dtype=float)
 
     data['1'][key]['B'] = calc_B(data['1'][key]['I_B'])
-    data['1'][key]['dB'] = 0.13636 * data['1'][key]['dI_B']
+    data['1'][key]['dB'] = np.sqrt((0.13636 * data['1'][key]['dI_B'])**2 + 0.005**2)
 
 
 result_1_I = lmfit(data['1']['a']['U_H'], data['1']['a']['B'], data['1']['a']['dB'])
 result_2_I = lmfit(data['1']['b']['U_H'], data['1']['b']['I_S'], data['dI_S']*np.ones(len(data['1']['b']['I_S'])))
+result_1_U = lmfit(data['1']['a']['B'], data['1']['a']['U_H'], data['1']['a']['dU_H'])
+result_2_U = lmfit(data['1']['b']['I_S'], data['1']['b']['U_H'], data['1']['b']['dU_H'])
+
 
 a1, da1, b1, db1, _, _ = slope(data['1']['a']['U_H'], data['1']['a']['B'], data['1']['a']['dB'])
 a2, da2, b2, db2, _, _ = slope(data['1']['b']['U_H'], data['1']['b']['I_S'], data['dI_S']*np.ones(len(data['1']['b']['I_S'])))
 
 print(result_1_I.fit_report())
 print(result_2_I.fit_report())
+print(result_1_U.fit_report())
+print(result_2_U.fit_report())
+
+
+
+B = data['1']['b']['B']
+
+R_H_a = data['d']/ result_1_I.params['b'].value/ data['1']['a']['I_S'][0]*10**3
+R_H_b = data['d']/ result_2_I.params['b'].value/ B[0]*10**3
+
+dR_H_a = R_H_a * np.sqrt( (result_1_I.params['b'].stderr/result_1_I.params['b'].value)**2 + (data['dI_S'][0]/data['1']['a']['I_S'][0])**2)
+dR_H_b = R_H_b * np.sqrt( (result_2_I.params['b'].stderr/result_2_I.params['b'].value)**2 + (data['1']['b']['dB'][0]/B[0])**2)
+
+print(f'R_H_a = ({round_val(R_H_a, dR_H_a)[0]} \\pm {round_val(R_H_a, dR_H_a)[1]}) 10^{{-3}} \\ m^3/C')
+print(f'R_H_b = ({round_val(R_H_b, dR_H_b)[0]} \\pm {round_val(R_H_b, dR_H_b)[1]}) 10^{{-3}} \\ m^3/C')
+
+R_H_a_slope = data['d']/ b1/ data['1']['a']['I_S'][0]*10**3
+R_H_b_slope = data['d']/ b2/ B[0]*10**3
+dR_H_a_slope = R_H_a_slope * np.sqrt( (db1/b1)**2 + (data['dI_S'][0]/data['1']['a']['I_S'][0])**2)
+dR_H_b_slope = R_H_b_slope * np.sqrt( (db2/b2)**2 + (data['1']['b']['dB'][0]/B[0])**2)
+
+print(f'R_H_a_slope = ({round_val(R_H_a_slope, dR_H_a_slope)[0]} \\pm {round_val(R_H_a_slope, dR_H_a_slope)[1]})10^{{-3}}m^3/C')
+print(f'R_H_b_slope = ({round_val(R_H_b_slope, dR_H_b_slope)[0]} \\pm {round_val(R_H_b_slope, dR_H_b_slope)[1]})10^{{-3}}m^3/C')
+
 
 
 x = np.linspace(data['1']['a']['U_H'][0], data['1']['a']['U_H'][-1], 100)
@@ -75,18 +102,18 @@ plot_data(
             'xerr': data['1']['a']['dU_H'],
             'fit_xdata' :x,
             'fit': result_1_I.eval(x=x),
-            'confidence': calc_CI(result_1_I, x)
+            'confidence': calc_CI(result_1_I, x, 3)
         }
     ],
     y_label=r'$B \ [T]$',
     x_label=r'$U_H \ [V]$',
     title='Hallspannung in Magnetfeld',
-    filename=f'Plots/HAL_1.pdf',
+    filename=f'Plots/HAL_I1.pdf',
     plot=False
 )
 
-x = np.linspace(data['1']['b']['U_H'][0], data['1']['b']['U_H'][-1], 100)
 
+x = np.linspace(data['1']['b']['U_H'][0], data['1']['b']['U_H'][-1], 100)
 plot_data(
     datasets= [
         {
@@ -96,33 +123,12 @@ plot_data(
             'xerr': data['1']['b']['dU_H'],
             'fit_xdata' :x,
             'fit': result_2_I.eval(x=x),
-            'confidence': calc_CI(result_2_I, x)
+            'confidence': calc_CI(result_2_I, x, 3)
         }
     ],
     y_label=r'$I_S \ [A]$',
     x_label=r'$U_H \ [V]$',
-    ymin=0,
     title='Hallspannung in Magnetfeld',
-    filename=f'Plots/HAL_2.pdf',
+    filename=f'Plots/HAL_I2.pdf',
     plot=False
 )
-
-B = data['1']['b']['B']
-
-R_H_a = data['d']/ result_1_I.params['b'].value/ data['1']['a']['I_S'][0]
-R_H_b = data['d']/ result_2_I.params['b'].value/ B[0]
-
-dR_H_a = R_H_a * np.sqrt( (result_1_I.params['b'].stderr/result_1_I.params['b'].value)**2 + (data['dI_S'][0]/data['1']['a']['I_S'][0])**2)
-dR_H_b = R_H_b * np.sqrt( (result_2_I.params['b'].stderr/result_2_I.params['b'].value)**2 + (data['1']['b']['dB'][0]/B[0])**2)
-
-print(f'R_H_a = {round_val(R_H_a, dR_H_a)[0]} \\pm {round_val(R_H_a, dR_H_a)[1]}')
-print(f'R_H_b = {round_val(R_H_b, dR_H_b)[0]} \\pm {round_val(R_H_b, dR_H_b)[1]}')
-
-R_H_a_slope = data['d']/ b1/ data['1']['a']['I_S'][0]
-R_H_b_slope = data['d']/ b2/ B[0]
-dR_H_a_slope = R_H_a_slope * np.sqrt( (db1/b1)**2 + (data['dI_S'][0]/data['1']['a']['I_S'][0])**2)
-dR_H_b_slope = R_H_b_slope * np.sqrt( (db2/b2)**2 + (data['1']['b']['dB'][0]/B[0])**2)
-
-print(f'R_H_a_slope = {round_val(R_H_a_slope, dR_H_a_slope)[0]} \\pm {round_val(R_H_a_slope, dR_H_a_slope)[1]}')
-print(f'R_H_b_slope = {round_val(R_H_b_slope, dR_H_b_slope)[0]} \\pm {round_val(R_H_b_slope, dR_H_b_slope)[1]}')
-

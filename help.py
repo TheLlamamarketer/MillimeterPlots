@@ -158,6 +158,8 @@ def calc_CI(result, xdata, sigmas=[1]):
     """
     ci_list = []
     try:
+        if not hasattr(sigmas, "__len__"):
+            sigmas = [sigmas]
         for sigma in sigmas:
             # Calculate uncertainty at the given sigma level
             uncertainty = result.eval_uncertainty(sigma=sigma, x=xdata)
