@@ -3,6 +3,7 @@ from plotting import plot_data, plot_color_seeds
 from tables import *
 from help import *
 from scipy.interpolate import UnivariateSpline
+import warnings
 
 
 data = {
@@ -158,18 +159,79 @@ y = 3 * np.log(data['2']['U_H']* data['2']['T'])
 x = 1/data['2']['T']
 dx = data['dT'] * np.ones(len(data['2']['T']))/data['2']['T']**2
 
-spline = UnivariateSpline(x, y, s=0.3, k=5)
+spline = UnivariateSpline(x, y, s=0.005, k=4)
 spline_der = spline.derivative()
+spline_der2 = spline.derivative(n=2)
 
+x_smooth = np.linspace(np.min(x), np.max(x), 300)
 
+m_spline = spline_der(x[np.argmin(spline_der2(x))])
 
-indexes = np.where((x >= 0.00275) & (x <= 0.00285))
+# index size between each point 0.0000085 1/K 
+
+indexes = np.where((x >= 0.002650) & (x <= 0.002751))
+indexes2 = np.where((x >= 0.00272) & (x <= 0.00278))
+#indexes = np.where((x >= 0.0027) & (x <= 0.002751))
 
 result = lmfit(x[indexes], y[indexes], None)
+result2 = lmfit(x[indexes2], y[indexes2], None)
 k_b = 1.38e-23
 e = 1.602e-19
 
-print(result.params['b'].value*k_b/e)
+E_1 = round_val(result.params['b'].value*k_b/e, result.params['b'].stderr*k_b/e)
+print(f"$E_1 = {E_1[0]} \\pm {E_1[1]}$")
+E_2 = round_val(result2.params['b'].value*k_b/e, result2.params['b'].stderr*k_b/e)
+print(f"$E_2 = {E_2[0]} \\pm {E_2[1]}$")
+print(f"m_spline = {m_spline*k_b/e}")
+
+
+
+def plot_intervals_r2(x, y, min_window_size=5, max_window_size=20):
+    colors = plt.cm.viridis(np.linspace(0, 1, max_window_size - min_window_size + 1))
+    datasets = []
+    best_intervals = []
+
+    for window_size, color in zip(range(min_window_size, max_window_size + 1), colors):
+        intervals = []
+        r2_values = []
+        n_points = len(x)
+        for start in range(n_points - window_size):
+            end = start + window_size
+            result = lmfit(x[start:end], y[start:end], None)
+            r2 = result.rsquared
+            intervals.append(x[start])
+            r2_values.append(r2)
+        
+        best_index = np.argmax(r2_values)
+        best_intervals.append((window_size, intervals[best_index], r2_values[best_index]))
+
+        datasets.append({
+            'ydata': r2_values,
+            'xdata': intervals,
+            'label': f'Window size {window_size}',
+            'color': color
+        })
+    
+    plot_data(
+        datasets=datasets,
+        y_label=r'$R^2$',
+        x_label=r'Starting value of interval',
+        ymin=0.99,
+        ymax=1,
+        title='R^2 values for different intervals',
+        filename=f'Plots/R2_intervals.pdf',
+        plot=False
+    )
+
+    # Evaluate the best intervals based on a score
+    scores = [(window_size, start, r2, r2) for window_size, start, r2 in best_intervals]
+    scores.sort(key=lambda x: x[3], reverse=True)
+
+    for window_size, start, r2, score in scores:
+        print(f'Window size: {window_size}, Start: {start:.6f}, R^2: {r2:.4f}, Score: {score:.4f}')
+
+#plot_intervals_r2(x[:-50], y[:-50], min_window_size=5, max_window_size=18)
+
 
 plot_data(
     datasets= [
@@ -177,9 +239,26 @@ plot_data(
             'ydata': y,
             'xdata': x,
             'xerr': dx,
-            'fit_xdata' :x,
-            'fit': spline(x),
-        }
+            'fit_xdata' :x_smooth,
+            'fit': spline(x_smooth),
+            'color_group':'1',
+        },
+        {
+            'ydata': result.eval(x=x),
+            'xdata': x,
+            'line': '-',
+            'marker': None,
+            'label': 'Fit',
+            'color_group':'1',
+        },
+        {
+            'ydata': result2.eval(x=x),
+            'xdata': x,
+            'line': '-',
+            'marker': None,
+            'label': 'Fit',
+            'color_group':'2',
+        },
     ],
     y_label=r'$3 \ ln(U_H \cdot T) $',
     x_label=r'$1/T \ [1/K]$',
@@ -192,8 +271,22 @@ plot_data(
 plot_data(
     datasets= [
         {
-            'ydata': spline_der(x)*k_b/e,
+            'ydata': spline(x)-y,
             'xdata': x,
+        }
+    ],
+    y_label=r'$3 \ ln(U_H \cdot T) - y$',
+    x_label=r'$1/T \ [1/K]$',
+    title='Hallspannung in Magnetfeld',
+    filename=f'Plots/HAL_2_res.pdf',
+    plot=False
+)
+
+plot_data(
+    datasets= [
+        {
+            'ydata': spline_der(x_smooth)*k_b/e,
+            'xdata': x_smooth,
             'line': '-',
             'marker': None,
         }
@@ -202,5 +295,21 @@ plot_data(
     x_label=r'$1/T \ [1/K]$',
     title='Hallspannung in Magnetfeld',
     filename=f'Plots/HAL_2_der.pdf',
+    plot=False
+)
+
+plot_data(
+    datasets= [
+        {
+            'ydata': spline_der2(x_smooth),
+            'xdata': x_smooth,
+            'line': '-',
+            'marker': None,
+        }
+    ],
+    y_label=r'$\frac{d^2}{dT^2} 3 \ ln(U_H \cdot T) $',
+    x_label=r'$1/T \ [1/K]$',
+    title='Hallspannung in Magnetfeld',
+    filename=f'Plots/HAL_2_der2.pdf',
     plot=False
 )
