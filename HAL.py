@@ -232,6 +232,20 @@ def plot_intervals_r2(x, y, min_window_size=5, max_window_size=20):
 
 #plot_intervals_r2(x[:-50], y[:-50], min_window_size=5, max_window_size=18)
 
+plot_data(
+    datasets= [
+        {
+            'ydata': data['2']['U_H'],
+            'xdata': data['2']['T'],
+        }
+    ],
+    y_label=r'$U_H \ [V]$',
+    x_label=r'$T \ [K]$',
+    title='Hallspannung in Magnetfeld',
+    filename=f'Plots/HAL_2pre.pdf',
+    plot=False
+)
+
 
 plot_data(
     datasets= [
@@ -248,15 +262,15 @@ plot_data(
             'xdata': x,
             'line': '-',
             'marker': None,
-            'label': 'Fit',
+            'label': 'linearer fit',
             'color_group':'1',
         },
         {
-            'ydata': result2.eval(x=x),
-            'xdata': x,
+            'ydata': spline_der(x[np.argmin(spline_der2(x))])*(x_smooth-x[np.argmin(spline_der2(x))]) +spline(x[np.argmin(spline_der2(x))]),
+            'xdata': x_smooth,
             'line': '-',
             'marker': None,
-            'label': 'Fit',
+            'label': 'fit ableitung spline',
             'color_group':'2',
         },
     ],
@@ -265,7 +279,7 @@ plot_data(
     title='Hallspannung in Magnetfeld',
     filename=f'Plots/HAL_2.pdf',
     ymax = 6.4,
-    plot=False
+    plot=True,
 )
 
 plot_data(
