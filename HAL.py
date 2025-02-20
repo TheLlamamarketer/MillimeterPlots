@@ -28,16 +28,28 @@ data = {
           81, 80, 79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61, 60, 59, 58, 57, 
           56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 
           31, 30, 29, 28, 27],
-        'U_H': ['5.0895', '5.2425', '5.4235', '5.621', '5.826', '6.031', '6.2125', '6.496', '6.774', '6.9535', '7.1795', 
-                '7.455', '7.6665', '7.885', '8.2255', '8.57', '8.837', '9.0955', '9.4545', '9.7355', '10.022', '10.432', 
-                '10.75', '11.112', '11.4385', '11.772', '12.1165', '12.509', '12.936', '13.287', '13.684', '14.0925', 
-                '14.496', '14.869', '15.2805', '15.696', '16.0545', '16.4195', '16.7905', '17.217', '17.624', '18.0095', 
-                '18.3325', '18.7645', '19.089', '19.458', '19.762', '20.1255', '20.467', '20.7755', '21.0395', '21.3345', 
-                '21.623', '21.8645', '22.1145', '22.344', '22.543', '22.724', '22.938', '23.1355', '23.312', '23.488', 
-                '23.642', '23.782', '23.898', '24.0315', '24.154', '24.2455', '24.3645', '24.448', '24.5315', '24.6045', 
-                '24.6735', '24.7345', '24.7975', '24.845', '24.893', '24.9345', '24.9705', '24.999', '25.0265', '25.05', 
-                '25.0695', '25.0895', '25.1065', '25.118', '25.127', '25.133', '25.135', '25.138', '25.1345', '25.1325', 
-                '25.1325', '25.13', '25.1275', '25.129', '25.1305', '25.142', '25.185'],
+        'U_H': ['5.090', '5.243', '5.424', '5.621', '5.826', '6.031', '6.213', '6.496', '6.774', '6.954', '7.180', 
+                '7.455', '7.667', '7.885', '8.226', '8.570', '8.837', '9.096', '9.455', '9.736', '10.022', '10.432', 
+                '10.75', '11.112', '11.439', '11.772', '12.117', '12.509', '12.936', '13.287', '13.684', '14.093', 
+                '14.496', '14.869', '15.281', '15.696', '16.055', '16.420', '16.791', '17.217', '17.624', '18.010', 
+                '18.333', '18.765', '19.089', '19.458', '19.762', '20.126', '20.467', '20.776', '21.040', '21.335', 
+                '21.623', '21.865', '22.115', '22.344', '22.543', '22.724', '22.938', '23.136', '23.312', '23.488', 
+                '23.642', '23.782', '23.898', '24.032', '24.154', '24.246', '24.365', '24.448', '24.532', '24.605', 
+                '24.674', '24.735', '24.798', '24.845', '24.893', '24.935', '24.971', '24.999', '25.027', '25.050', 
+                '25.070', '25.090', '25.107', '25.118', '25.127', '25.133', '25.135', '25.138', '25.135', '25.133', 
+                '25.133', '25.130', '25.128', '25.129', '25.131', '25.142', '25.185'],
+
+        'dU_H': ["0.107", "0.139", "0.183", "0.17", "0.2", "0.15", "0.161", "0.32", "0.116", "0.207", "0.233", "0.166",
+                "0.201", "0.22", "0.369", "0.228", "0.186", "0.273", "0.243", "0.203", "0.286", "0.292", "0.24", "0.358",
+                "0.251", "0.328", "0.297", "0.274", "0.4", "0.298", "0.334", "0.351", "0.328", "0.194", "0.375", "0.336", 
+                "0.385", "0.313", "0.333", "0.36", "0.384", "0.285", "0.259", "0.255", "0.292", "0.27", "0.278", "0.313", 
+                "0.302", "0.199", "0.247", "0.257", "0.2", "0.215", "0.197", "0.19", "0.178", "0.178", "0.17", "0.161", 
+                "0.178", "0.166", "0.138", "0.14", "0.068", "0.089", "0.062", "0.099", "0.083", "0.07", "0.071", "0.063", 
+                "0.039", "0.057", "0.051", "0.04", "0.038", "0.041", "0.025", "0.026", "0.021", "0.018", "0.019", "0.017", 
+                "0.013", "0.008", "0.006", "0.004", "0.002", "0.002", "0.005", "0.001", "0.001", "0.006", "0.001", "0", 
+                "0.005", "0.012", "0.026"
+
+        ]
     }
 }
 
@@ -79,10 +91,10 @@ result_2_U = lmfit(data['1']['b']['I_S'], data['1']['b']['U_H'], data['1']['b'][
 a1, da1, b1, db1, _, _ = slope(data['1']['a']['U_H'], data['1']['a']['B'], data['1']['a']['dB'])
 a2, da2, b2, db2, _, _ = slope(data['1']['b']['U_H'], data['1']['b']['I_S'], data['dI_S']*np.ones(len(data['1']['b']['I_S'])))
 
-print(result_1_I.fit_report())
-print(result_2_I.fit_report())
-print(result_1_U.fit_report())
-print(result_2_U.fit_report())
+#print(result_1_I.fit_report())
+#print(result_2_I.fit_report())
+#print(result_1_U.fit_report())
+#print(result_2_U.fit_report())
 
 
 
@@ -120,8 +132,8 @@ plot_data(
             'confidence': calc_CI(result_1_I, x, 3)
         }
     ],
-    y_label=r'$B \ [T]$',
-    x_label=r'$U_H \ [V]$',
+    y_label=r'$B \ T$',
+    x_label=r'$U_H \ V$',
     title='Hallspannung in Magnetfeld',
     filename=f'Plots/HAL_I1.pdf',
     plot=False
@@ -141,8 +153,8 @@ plot_data(
             'confidence': calc_CI(result_2_I, x, 3)
         }
     ],
-    y_label=r'$I_S \ [A]$',
-    x_label=r'$U_H \ [V]$',
+    y_label=r'$I_S \ A$',
+    x_label=r'$U_H \ V$',
     title='Hallspannung in Magnetfeld',
     filename=f'Plots/HAL_I2.pdf',
     plot=False
@@ -150,33 +162,39 @@ plot_data(
 
 U_H = np.array([Decimal(U) for U in data['2']['U_H']])
 T = np.array([Decimal(T) for T in data['2']['T']])
+dU_H = np.array([Decimal(U) for U in data['2']['dU_H']], dtype=float)
 
 data['2']['U_H'] = np.array(U_H/1000, dtype=float)
 data['2']['T'] = np.array(T, dtype=float) + 273.15
+data['2']['dU_H'] = np.maximum(calc_dU(U_H)/1000, dU_H/1000/np.sqrt(2), dtype=float)
 
 
-y = 3 * np.log(data['2']['U_H']* data['2']['T'])
+y = np.log(data['2']['U_H']**2 * data['2']['T']**3)
 x = 1/data['2']['T']
 dx = data['dT'] * np.ones(len(data['2']['T']))/data['2']['T']**2
+dy = np.sqrt((2*data['2']['dU_H']/data['2']['U_H'])**2 + (3 * data['dT'][0] * np.ones(len(data['2']['T']))/data['2']['T'])**2)
 
-spline = UnivariateSpline(x, y, s=0.005, k=4)
+
+spline = UnivariateSpline(x, y, s=0.0025, k=4)
 spline_der = spline.derivative()
 spline_der2 = spline.derivative(n=2)
 
 x_smooth = np.linspace(np.min(x), np.max(x), 300)
+x_smooth_reduced = np.linspace(np.min(x[:-55]), np.max(x[:-55]), 300)
 
 m_spline = spline_der(x[np.argmin(spline_der2(x))])
 
 # index size between each point 0.0000085 1/K 
 
-indexes = np.where((x >= 0.002650) & (x <= 0.002751))
-indexes2 = np.where((x >= 0.00272) & (x <= 0.00278))
+
+indexes = np.where((x >= 0.002651) & (x <= 0.002744))
+indexes2 = np.where((x >= 0.002556) & (x <= 0.002701))
 #indexes = np.where((x >= 0.0027) & (x <= 0.002751))
 
-result = lmfit(x[indexes], y[indexes], None)
-result2 = lmfit(x[indexes2], y[indexes2], None)
-k_b = 1.38e-23
-e = 1.602e-19
+result = lmfit(x[indexes], y[indexes], dy[indexes])
+result2 = lmfit(x[indexes2], y[indexes2], dy[indexes2])
+k_b = 1.380649e-23
+e = 1.602176634e-19
 
 E_1 = round_val(result.params['b'].value*k_b/e, result.params['b'].stderr*k_b/e)
 print(f"$E_1 = {E_1[0]} \\pm {E_1[1]}$")
@@ -185,8 +203,14 @@ print(f"$E_2 = {E_2[0]} \\pm {E_2[1]}$")
 print(f"m_spline = {m_spline*k_b/e}")
 
 
+E = (E_1[0]/E_1[1]**2 + E_2[0]/E_2[1]**2)/(1/E_1[1]**2 + 1/E_2[1]**2)
+dE = 1/np.sqrt(1/E_1[1]**2 + 1/E_2[1]**2)
 
-def plot_intervals_r2(x, y, min_window_size=5, max_window_size=20):
+print(f'$E_g = {print_round_val(E, dE, False)} eV$')
+
+
+
+def plot_intervals_r2(x, y, dy, min_window_size=5, max_window_size=20):
     colors = plt.cm.viridis(np.linspace(0, 1, max_window_size - min_window_size + 1))
     datasets = []
     best_intervals = []
@@ -194,16 +218,19 @@ def plot_intervals_r2(x, y, min_window_size=5, max_window_size=20):
     for window_size, color in zip(range(min_window_size, max_window_size + 1), colors):
         intervals = []
         r2_values = []
+        b_values = []
         n_points = len(x)
         for start in range(n_points - window_size):
             end = start + window_size
-            result = lmfit(x[start:end], y[start:end], None)
+            result = lmfit(x[start:end], y[start:end], dy[start:end])
             r2 = result.rsquared
+            b = result.params['b'].value
             intervals.append(x[start])
             r2_values.append(r2)
+            b_values.append(b)
         
         best_index = np.argmax(r2_values)
-        best_intervals.append((window_size, intervals[best_index], r2_values[best_index]))
+        best_intervals.append((window_size, intervals[best_index], r2_values[best_index], b_values[best_index]))
 
         datasets.append({
             'ydata': r2_values,
@@ -224,28 +251,33 @@ def plot_intervals_r2(x, y, min_window_size=5, max_window_size=20):
     )
 
     # Evaluate the best intervals based on a score
-    scores = [(window_size, start, r2, r2) for window_size, start, r2 in best_intervals]
+    maxr2 = max([r2 for window_size, start, r2, b in best_intervals])
+    minr2 = min([r2 for window_size, start, r2, b in best_intervals])
+    maxwindow = max([window_size for window_size, start, r2, b in best_intervals])
+    scores = [(window_size, start, r2, (r2-minr2)/(maxr2-minr2) + window_size/maxwindow, b) for window_size, start, r2, b in best_intervals]
     scores.sort(key=lambda x: x[3], reverse=True)
 
-    for window_size, start, r2, score in scores:
-        print(f'Window size: {window_size}, Start: {start:.6f}, R^2: {r2:.4f}, Score: {score:.4f}')
+    for window_size, start, r2, score, b in scores:
+        interval = window_size/((125+273.15)*(24+273.15))
+        print(f'Window size: {window_size}, Start: {start:.6f}, End: {(start + interval):6f}, Interval: {interval:6f}, R^2: {r2:.4f}, Score: {score:.4f}, slope: {b:.4f}')
 
-#plot_intervals_r2(x[:-50], y[:-50], min_window_size=5, max_window_size=18)
+plot_intervals_r2(x[:-55], y[:-55], dy[:-55], min_window_size=5, max_window_size=28)
 
 plot_data(
     datasets= [
         {
             'ydata': data['2']['U_H'],
             'xdata': data['2']['T'],
+            'xerr': data['dT']*np.ones(len(data['2']['T'])),
+            'yerr': data['2']['dU_H'],
         }
     ],
-    y_label=r'$U_H \ [V]$',
-    x_label=r'$T \ [K]$',
+    y_label=r'$U_H \ V$',
+    x_label=r'$T \ K$',
     title='Hallspannung in Magnetfeld',
     filename=f'Plots/HAL_2pre.pdf',
     plot=False
 )
-
 
 plot_data(
     datasets= [
@@ -253,34 +285,97 @@ plot_data(
             'ydata': y,
             'xdata': x,
             'xerr': dx,
+            'yerr': dy,
             'fit_xdata' :x_smooth,
             'fit': spline(x_smooth),
             'color_group':'1',
+            'label': 'daten',
         },
         {
             'ydata': result.eval(x=x),
             'xdata': x,
             'line': '-',
             'marker': None,
-            'label': 'linearer fit',
-            'color_group':'1',
+            'confidence': calc_CI(result, x, 3),
+            'label': 'linearer fit 1',
+            'color_group':'3',
         },
         {
-            'ydata': spline_der(x[np.argmin(spline_der2(x))])*(x_smooth-x[np.argmin(spline_der2(x))]) +spline(x[np.argmin(spline_der2(x))]),
+            'ydata': result2.eval(x=x),
+            'xdata': x,
+            'line': '-',
+            'marker': None,
+            'confidence': calc_CI(result2, x, 3),
+            'label': 'linearer fit 2',
+            'color_group':'3',
+        },
+    ],
+    y_label=r'$ln(U_H^2 \cdot T^3)$',
+    x_label=r'$1/T \ K^{-1}$',
+    ymax = 10,
+    title='Hallspannung in Magnetfeld',
+    filename=f'Plots/HAL_2.pdf',
+    plot=False,
+)
+
+'''
+        {
+            'ydata': spline_der(x_smooth[np.argmin(spline_der2(x_smooth))])*(x_smooth-x_smooth[np.argmin(spline_der2(x_smooth))]) + spline(x_smooth[np.argmin(spline_der2(x_smooth))]),
             'xdata': x_smooth,
             'line': '-',
             'marker': None,
-            'label': 'fit ableitung spline',
+            'label': 'Steigung von ableitung spline',
+            'color_group':'2',
+        },'''
+
+plot_data(
+    datasets= [
+        {
+            'ydata': y[:-55],
+            'xdata': x[:-55],
+            'xerr': dx[:-55],
+            'yerr': dy[:-55],
+            'fit_xdata' :x_smooth_reduced,
+            'fit': spline(x_smooth_reduced),
+            'color_group':'1',
+            'label': 'daten',
+        },
+        {
+            'ydata': result.eval(x=x[:-55]),
+            'xdata': x[:-55],
+            'line': '-',
+            'marker': None,
+            'confidence': calc_CI(result, x[:-55], 3),
+            'label': 'linearer fit 1',
             'color_group':'2',
         },
+        {
+            'ydata': result2.eval(x=x[:-55]),
+            'xdata': x[:-55],
+            'line': '-',
+            'marker': None,
+            'confidence': calc_CI(result2, x[:-55], 3),
+            'label': 'linearer fit 2',
+            'color_group':'3',
+        },
     ],
-    y_label=r'$3 \ ln(U_H \cdot T) $',
+    y_label=r'$ln(U_H^2 \cdot T^3)$',
     x_label=r'$1/T \ [1/K]$',
+    ymax = 10,
     title='Hallspannung in Magnetfeld',
-    filename=f'Plots/HAL_2.pdf',
-    ymax = 6.4,
-    plot=True,
+    filename=f'Plots/HAL_2close.pdf',
+    plot=False,
 )
+'''
+        {
+            'ydata': spline_der(x_smooth_reduced[np.argmin(spline_der2(x_smooth_reduced))])*(x_smooth_reduced-x_smooth_reduced[np.argmin(spline_der2(x_smooth_reduced))]) + spline(x_smooth_reduced[np.argmin(spline_der2(x_smooth_reduced))]),
+            'xdata': x_smooth_reduced,
+            'line': '-',
+            'marker': None,
+            'label': 'Steigung von ableitung spline',
+            'color_group':'2',
+        },'''
+
 
 plot_data(
     datasets= [

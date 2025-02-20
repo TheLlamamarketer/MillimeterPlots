@@ -22,7 +22,7 @@ def last_digit(num):
         return np.vectorize(last_digit)(num)
     elif isinstance(num, (int, float, Decimal)):
         if isinstance(num, (float, Decimal)):
-            return round(10**-LastSignificant(num), LastSignificant(num))
+            return 10**-LastSignificant(num)
         else: 
             return 1
     else:
@@ -157,10 +157,17 @@ def calc_CI(result, xdata, sigmas=[1]):
     - ci_list: List of tuples with (lower, upper) bounds for the fit curve at different sigma levels.
     """
     ci_list = []
+    sigmas_list = [None, None, None]
     try:
         if not hasattr(sigmas, "__len__"):
-            sigmas = [sigmas]
-        for sigma in sigmas:
+            sigmas_list[sigmas - 1] = sigmas
+        else:
+            for sigma in sigmas:
+                sigmas_list[sigma - 1] = sigma
+        for sigma in sigmas_list:
+            if sigma is None:
+                ci_list.append((None, None))
+                continue
             # Calculate uncertainty at the given sigma level
             uncertainty = result.eval_uncertainty(sigma=sigma, x=xdata)
             best_fit = result.eval(x=xdata)
@@ -172,7 +179,7 @@ def calc_CI(result, xdata, sigmas=[1]):
     except Exception as e:
         import logging
         logging.error(f"Error calculating confidence intervals: {e}")
-        for sigma in sigmas:
+        for sigma in sigmas_list:
             ci_list.append((np.full_like(xdata, np.nan), np.full_like(xdata, np.nan)))
     return ci_list
 
