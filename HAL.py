@@ -55,10 +55,10 @@ data = {
 
 
 def calc_dU(U):
-    return np.array(U, dtype=float) * 0.004 + 5* last_digit(U)
+    return abs(np.array(U, dtype=float) * 0.004) + 5* last_digit(U)
 
 def calc_dI_B(I_B):
-    return np.array(I_B, dtype=float) * 0.008 + 5* last_digit(I_B)
+    return abs(np.array(I_B, dtype=float) * 0.008) + 5* last_digit(I_B)
 
 def calc_B(I):
     return I*0.13636 + 0.004546
@@ -82,6 +82,36 @@ for key in data['1']:
     data['1'][key]['dB'] = np.sqrt((0.13636 * data['1'][key]['dI_B'])**2 + 0.005**2)
 
 
+
+headers = {'U_H': {'label': '{$U_H/mV$}', 'err': data['1']['a']['dU_H']*1000, 'data': data['1']['a']['U_H']*1000},
+           'I_B': {'label': '{$I_B/A$}', 'err': data['1']['a']['dI_B']},
+           'B': {'label': '{$B/mT$}', 'err': data['1']['a']['dB']*1000, 'data': data['1']['a']['B']*1000},
+}
+
+print_standard_table(
+    data=data['1']['a'],
+    headers=headers,
+    column_formats= ["2.1"] * len(headers),
+    caption="d",
+    label="tab:A1a",
+    show=False
+)
+
+headers = {'U_H': {'label': '{$U_H/mV$}', 'err': data['1']['b']['dU_H']*1000, 'data': data['1']['b']['U_H']*1000},
+           'I_S': {'label': '{$I_S/mA$}', 'err': data['dI_S'][0]*1000, 'data': data['1']['b']['I_S']*1000},
+}
+
+print_standard_table(
+    data=data['1']['b'],
+    headers=headers,
+    column_formats= ["2.1"] * len(headers),
+    caption="d",
+    label="tab:A1b",
+    show=True
+)
+
+
+
 result_1_I = lmfit(data['1']['a']['U_H'], data['1']['a']['B'], data['1']['a']['dB'])
 result_2_I = lmfit(data['1']['b']['U_H'], data['1']['b']['I_S'], data['dI_S']*np.ones(len(data['1']['b']['I_S'])))
 result_1_U = lmfit(data['1']['a']['B'], data['1']['a']['U_H'], data['1']['a']['dU_H'])
@@ -96,6 +126,8 @@ a2, da2, b2, db2, _, _ = slope(data['1']['b']['U_H'], data['1']['b']['I_S'], dat
 #print(result_1_U.fit_report())
 #print(result_2_U.fit_report())
 
+print(f'b = {print_round_val(result_1_I.params['b'].value, result_1_I.params['b'].stderr)}T/V')
+print(f'b = {print_round_val(result_2_I.params['b'].value, result_2_I.params['b'].stderr)}A/V')
 
 
 B = data['1']['b']['B']
@@ -261,7 +293,7 @@ def plot_intervals_r2(x, y, dy, min_window_size=5, max_window_size=20):
         interval = window_size/((125+273.15)*(24+273.15))
         print(f'Window size: {window_size}, Start: {start:.6f}, End: {(start + interval):6f}, Interval: {interval:6f}, R^2: {r2:.4f}, Score: {score:.4f}, slope: {b:.4f}')
 
-plot_intervals_r2(x[:-55], y[:-55], dy[:-55], min_window_size=5, max_window_size=28)
+#plot_intervals_r2(x[:-55], y[:-55], dy[:-55], min_window_size=5, max_window_size=28)
 
 plot_data(
     datasets= [
