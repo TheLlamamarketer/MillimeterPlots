@@ -16,7 +16,6 @@ def process_file(input_file, output_file):
 # File paths (update as needed)
 input_file = "test00.txt"  # Input file with raw data
 output_file = "out_test00.txt"  # Output file with processed data
-from unittest import result
 import numpy as np
 
 x = np.linspace(0, 90, 1000) 
@@ -34,7 +33,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from help import *
 from plotting import plot_data
-from tables import print_standard_table, print_complex_table
+from tables import print_standard_table
 
 data0 = {
     "l":[0, 0.55, 1.1, 1.65, 2.2, 2.75, 3.3, 3.85, 4.4, 4.95, 5.5, 6.05, 6.6, 7.15, 7.7, 8.25, 8.8, 9.35, 9.9, 10.45, 10.6],

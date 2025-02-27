@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 import random
@@ -272,9 +273,31 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
                 continue
 
 
+        
+
         if y_error is None and x_error is None:
-            ax.plot(xdata, ydata, color=color, marker=marker, linestyle=line, linewidth=1,
-                    label=label, markersize=10, alpha=0.9, zorder=4)
+
+            seen_points = {}
+            for x, y in zip(xdata, ydata):
+                point = (x, y)
+                seen_points[point] = seen_points.get(point, 0) + 1
+
+            xdata, ydata = zip(*seen_points.keys())
+
+            log_counts = np.array([math.log(count + 1) for count in seen_points.values()])
+
+            if log_counts.max() - log_counts.min() == 0:
+                normalized = np.ones_like(log_counts)
+            else:
+                normalized = (log_counts - log_counts.min()) / (log_counts.max() - log_counts.min())
+
+            sizes = 10 + normalized * (100 - 10)
+            
+
+            if marker != 'None':
+                ax.scatter(xdata, ydata, color=color, marker=marker, s=sizes, alpha=0.9, zorder=4, label=label)
+            if line != 'None':
+                ax.plot(xdata, ydata, color=color, linestyle=line, linewidth=1, zorder=4, label=label, marker=marker, markersize=10)
         else:
             try:
                 if isinstance(y_error, tuple) and len(y_error) == 2:
