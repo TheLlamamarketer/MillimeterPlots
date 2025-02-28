@@ -51,6 +51,7 @@ def varied_color(base_hex, color_seed=100, hue_range=0.04, index=0):
     rgb = colorsys.hsv_to_rgb(new_hue, base_sat, base_val)
     return mcolors.to_hex([*rgb])
 
+
 def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF', hue_range=0.05):
     """
     Assign colors to datasets based on their color groups or individual IDs.
@@ -112,6 +113,7 @@ def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF', hue_range=0.
                 color_idx, total_colors_needed, bg_hex=bg_hex, color_seed=color_seed
             )
     return colors
+
 
 def plot_grid(ax, width, height, bg_hex, xstep, xtickoffset, xmin, xmax, ystep, ytickoffset, ymin, ymax):
 
@@ -187,13 +189,22 @@ def plot_color_seeds(seed_range=(100, 120), num_datasets=3, bg_hex='#FFFFFF', hu
     ax.set_frame_on(False)
     
     plt.show()
-
-
-def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
-              legend_position='best', color_seed=203, width=20, height=20,
-              plot=True, ymax=None, ymin=None, xmax=None, xmin=None, xticks=None, yticks=None, bg_hex='#FFFFFF'):
+    
+def plot_data(filename, datasets, color_map=None, color_seed=203,
+              title=None, xlabel=None, ylabel=None,
+              legend_position='best', width=20, height=20,
+              plot=True, ymax=None, ymin=None, xmax=None, xmin=None, 
+              xticks=None, yticks=None, bg_hex='#FFFFFF'):
     
     fig, ax = plt.subplots(figsize=(width/2.54, height/2.54), constrained_layout=True)
+
+    if color_map is None:
+        color_map = {}
+        for d in datasets:
+            color_map[id(d)] = "#000000"
+
+    if type(datasets) is not list:
+        datasets = [datasets]
 
     colors = colors_from_groups(datasets, color_seed=color_seed, bg_hex=bg_hex)
 
@@ -339,8 +350,8 @@ def plot_data(filename, datasets, title=None, x_label=None, y_label=None,
     if any(labels) and legend_position:
         ax.legend(loc=legend_position)
 
-    ax.set_xlabel(x_label if x_label else '')
-    ax.set_ylabel(y_label if y_label else '')
+    ax.set_xlabel(xlabel if xlabel else '')
+    ax.set_ylabel(ylabel if ylabel else '')
     ax.set_title(title if title else '')
 
     ax.set_ylim(bottom=ymin, top=ymax)

@@ -3,8 +3,9 @@ from collections import defaultdict
 from plotting import plot_data, plot_color_seeds
 from tables import *
 from help import *
-from scipy.interpolate import UnivariateSpline
-from scipy.interpolate import PPoly
+from scipy.interpolate import UnivariateSpline, PPoly
+
+print('\n')
 
 data = {}
 def process_file(file):
@@ -35,88 +36,163 @@ def masks (x, y) -> dict:
     'FHZ_data/FHZ HG Palex 3.txt': (x < 5.2) & (x > 0.5) & (y < 8)
 }
 
+def intervals (x) -> dict:
+    return {
+    'FHZ_data/FHZ Neon Palex.txt': (),
+    'FHZ_data/FHZ HG Palex 1.txt': (x < 10) & (x > 2),
+    'FHZ_data/FHZ HG Palex 2.txt': (x < 14) & (x > 3),
+    'FHZ_data/FHZ HG Palex 3.txt': (x < 8) & (x > 1)
+}
 
-for file in files:
+names = [
+    'Neon',
+    'Hg 190°C',
+    'Hg 210°C',
+    'Hg 150°C'
+]
+
+datasets_together = []
+datasets_max_together = []
+
+
+
+for j, file in enumerate(files):
     x = data[file][1]
     y = data[file][2]
+    sy = 0.07874
 
     mask = (y > 0)
     mask &= masks(x, y)[file]
 
-    x = x[mask]
+    x = x[mask]*10.0
     y = y[mask]
 
     x_to_ys = defaultdict(list)
-    x_to_weights = defaultdict(list)
 
     for xi, yi in zip(x, y):
-        # Here, we treat each occurrence as weight 1. If you already have different weights, use them.
         x_to_ys[xi].append(yi)
-        x_to_weights[xi].append(1)  # or another weight if available
 
-    # Compute the weighted average for each unique x
     xdata_unique = []
     ydata_unique = []
-    weights_unique = []
+    n = []
+    yerr_unique = []
 
     for xi in sorted(x_to_ys.keys()):
         ys = np.array(x_to_ys[xi])
-        ws = np.array(x_to_weights[xi])
-        weighted_avg = np.average(ys, weights=ws)
-        total_weight = np.sum(ws)
+        avg = np.mean(ys)
+        ni = np.sum(len(ys))
+
         xdata_unique.append(xi)
-        ydata_unique.append(weighted_avg)
-        weights_unique.append(total_weight)
+        ydata_unique.append(avg)
+        n.append(ni)
 
     xdata_unique = np.array(xdata_unique)
     ydata_unique = np.array(ydata_unique)
-    weights_unique = np.array(weights_unique)
+    n = np.array(n)
 
     # Now, fit the spline using the aggregated data.
-    spline = UnivariateSpline(xdata_unique, ydata_unique, k=3, s=200000, w=weights_unique)
+    spline = UnivariateSpline(xdata_unique, ydata_unique, k=3, s=200000, w=n)
 
-    plot_data(
-        datasets= [
-            {
-            'xdata': x,
-            'ydata': y,
-            'fit_xdata': np.linspace(min(x), max(x), 1000),
-            'fit': spline(np.linspace(min(x), max(x), 1000)),
-            'label': 'Data',
-            'line': 'None',
-            }
-        ],
-        filename=f'Plots/{file.split("/")[-1].split(".")[0].replace(' Palex', '')}.pdf',
-        plot=False
-    )
 
-    spline_der = spline.derivative()
-    spline_der2 = spline.derivative(n=2)
+    max_positions = [] 
 
-    roots = PPoly.from_spline(spline_der._eval_args).roots()
-    roots = np.unique(roots) 
+    x_fit = np.linspace(xdata_unique.min(), xdata_unique.max(), 1000)
+    splines = []
 
-    maxima = [r for r in roots if spline_der2(r) < 0]
+    for i in range(1000):
+        y_sim = np.random.normal(ydata_unique, sy / np.sqrt(n), size=ydata_unique.shape)
+        
+        spline_sim = UnivariateSpline(xdata_unique, y_sim, k=3, s=200000, w=n)
+        splines.append(spline_sim(x_fit))
+        
+        try:
+            roots = PPoly.from_spline(spline_sim.derivative()._eval_args).roots()
+            roots = np.unique(roots)
+            maxima = np.array([r for r in roots if spline_sim.derivative(n=2)(r) < 0])
+        except Exception as e:
+            maxima = np.array([np.nan])
+        
+        max_positions.append(maxima)
 
-    print('\n')
-    print('_'*50)
+    splines = np.array(splines)
+
+    mean_spline = np.mean(splines, axis=0)
+    #lower_bound = np.percentile(splines, 1, axis=0)
+    #upper_bound = np.percentile(splines, 99, axis=0)
+
+    # Pad the max_positions lists with NaN values to ensure they are of the same length
+    max_length = max(len(maxima) for maxima in max_positions)
+    max_positions = np.array([np.pad(maxima, (0, max_length - len(maxima)), constant_values=np.nan) for maxima in max_positions])
+
+    mean_max = np.nanmean(max_positions, axis=0)
+    std_max = np.nanstd(max_positions, axis=0)
+
+    numbers = np.linspace(1, len(mean_max), len(mean_max))
+
+    mask = intervals(numbers)[file]
+    new_maxima = mean_max[mask]
+    new_numbers = numbers[mask]
+
+    result = lmfit(new_numbers, new_maxima)
+
     print(f'File: {file}')
-    print(f'Maxima: {maxima}')
-    print(f'Maxima distances: {np.diff(maxima)}')
-    print(f'Average distance: {np.mean(np.diff(maxima))}')
+    print(f"$({print_round_val(result.params['b'].value, result.params['b'].stderr)})eV$")
 
+    datasets= [{
+        'xdata': x,
+        'ydata': y,
+        'fit_xdata': x_fit,
+        'fit': mean_spline,
+        #'confidence': [(lower_bound, upper_bound)],
+        'label': f'{names[j]}',
+        'line': 'None',
+        'color_group': j,
+    }]
+
+    datasets_together.extend(datasets)
+
+    datasets_max = [{
+        'xdata': numbers,
+        'ydata': mean_max,
+        'yerr': std_max,
+        'label': f'Maxima {names[j]}',
+        'line': 'None',
+        'fit': result.eval(x=numbers),
+        'confidence': calc_CI(result, numbers, sigmas=[2]),
+    }]
+
+    datasets_max_together.extend(datasets_max)
+
+plot_data(
+    datasets = datasets_max_together[1:],
+    ylabel= r'$E_{kin} / eV$',
+    xlabel= r'Maximum Nummer \#',
+    filename=f'Plots/FHZ All max.pdf',
+    plot=False
+)
+
+for file, datasets in zip(files, datasets_max_together):
     plot_data(
-        datasets= [
-            {
-            'xdata': np.linspace(0, len(maxima) - 1, len(maxima)),
-            'ydata': maxima,
-            'label': 'Maxima',
-            'line': 'None',
-            }
-        ],
-        filename=f'Plots/{file.split("/")[-1].split(".")[0].replace(' Palex', '')}_maxima.pdf',
+        datasets= datasets_max,
+        ylabel= r'$E_{kin} / eV$',
+        xlabel= r'Maximum Nummer \#',
+        filename=f'Plots/{file.split("/")[-1].split(".")[0].replace(" Palex", "")} max.pdf',
         plot=False
     )
 
+plot_data(
+    datasets = datasets_together[1:],
+    ylabel= r'$U_A / V$',
+    xlabel= r'$U_B / V$',
+    filename=f'Plots/FHZ All.pdf',
+    plot=False
+)
 
-
+for file, datasets in zip(files, datasets_together):
+    plot_data(
+        datasets = datasets,
+        ylabel= r'$U_A / V$',
+        xlabel= r'$U_B / V$',
+        filename=f'Plots/{file.split("/")[-1].split(".")[0].replace(" Palex", "")}.pdf',
+        plot=False
+    )
