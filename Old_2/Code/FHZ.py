@@ -1,3 +1,4 @@
+from calendar import c
 import numpy as np
 from collections import defaultdict
 from plotting import plot_data, plot_color_seeds
@@ -108,7 +109,7 @@ for j, file in enumerate(files):
         try:
             roots = PPoly.from_spline(spline_sim.derivative()._eval_args).roots()
             roots = np.unique(roots)
-            maxima = np.array([r for r in roots if spline_sim.derivative(n=2)(r) < 0])
+            maxima = np.array([r for r in roots if np.all(np.array(spline_sim.derivative(n=2)(r)) < 0)])
         except Exception as e:
             maxima = np.array([np.nan])
         
@@ -135,8 +136,17 @@ for j, file in enumerate(files):
 
     result = lmfit(new_numbers, new_maxima)
 
+    h = 6.62607015e-34
+    c = 299792458
+    e = 1.602176634e-19
+
     print(f'File: {file}')
-    print(f"$({print_round_val(result.params['b'].value, result.params['b'].stderr)})eV$")
+    print(f"E = $({print_round_val(result.params['b'].value, result.params['b'].stderr)})eV$")
+
+    wavelength = h*c /result.params['b'].value /e
+    print(f"\\lambda_{{{names[j].replace('Hg ', '').replace('on', '')}}} = ({print_round_val(wavelength*1e9, result.params['b'].stderr * h*c /result.params['b'].value**2 /e*1e9)})\\, \\mathrm{{nm}}")
+    print(f"f_{{{names[j].replace('Hg ', '').replace('on', '')}}} = ({print_round_val(result.params['b'].value / h * e * 1e-15, result.params['b'].stderr / h * e * 1e-15)})\\, 10^{{15}} \\mathrm{{Hz}}")
+    print('\n')
 
     datasets= [{
         'xdata': x,
@@ -160,25 +170,24 @@ for j, file in enumerate(files):
         'fit': result.eval(x=numbers),
         'confidence': calc_CI(result, numbers, sigmas=[2]),
     }]
-
     datasets_max_together.extend(datasets_max)
 
 plot_data(
     datasets = datasets_max_together[1:],
     ylabel= r'$E_{kin} / eV$',
-    xlabel= r'Maximum Nummer \#',
+    xlabel= r'Peaknummer \#',
     filename=f'Plots/FHZ All max.pdf',
     plot=False
 )
 
-for file, datasets in zip(files, datasets_max_together):
-    plot_data(
-        datasets= datasets_max,
-        ylabel= r'$E_{kin} / eV$',
-        xlabel= r'Maximum Nummer \#',
-        filename=f'Plots/{file.split("/")[-1].split(".")[0].replace(" Palex", "")} max.pdf',
-        plot=False
-    )
+plot_data(
+    datasets= datasets_max_together[0],
+    ylabel= r'$E_{kin} / eV$',
+    xlabel= r'Peaknummer \#',
+    filename=f'Plots/{files[0].split("/")[-1].split(".")[0].replace(" Palex", "")} max.pdf',
+    plot=False
+)
+
 
 plot_data(
     datasets = datasets_together[1:],
