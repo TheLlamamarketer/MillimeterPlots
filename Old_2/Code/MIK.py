@@ -1,5 +1,7 @@
 import numpy as np
-from traitlets import Instance
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from plotting import plot_data
 from help import *
 from tables import print_standard_table, print_complex_table

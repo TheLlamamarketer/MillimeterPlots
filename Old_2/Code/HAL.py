@@ -1,9 +1,11 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np
 from plotting import plot_data, plot_color_seeds
 from tables import *
 from help import *
 from scipy.interpolate import UnivariateSpline
-import warnings
 
 
 data = {

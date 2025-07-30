@@ -1,5 +1,8 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np
-from plotting import plot_data, plot_color_seeds
+from plotting import plot_data
 from tables import *
 from help import *
 from decimal import Decimal
@@ -127,8 +130,8 @@ plot_data(
         },
 
     ],
-    x_label='Zeit $t$/ ms',
-    y_label='Spannung $U$/V',
+    xlabel='Zeit $t$/ ms',
+    ylabel='Spannung $U$/V',
     title='Auf und Entladung Kondensator',
     filename='Plots/WSK_1.pdf',
     width=25,
@@ -195,8 +198,8 @@ for mask in [char_mask, dischar_mask]:
 
 plot_data(
     datasets=datasets,
-    x_label='Zeit $t$/ms',
-    y_label='ln$(1 - U/U_{max})$ bzw. ln$(U/U_{max})$',
+    xlabel='Zeit $t$/ms',
+    ylabel='ln$(1 - U/U_{max})$ bzw. ln$(U/U_{max})$',
     title='Auf und Entladung Kondensator',
     filename='Plots/WSK_2.pdf',
     ymin=-5,
@@ -271,8 +274,8 @@ for dataset in datasets:
 
 plot_data(
     datasets=datasets,
-    x_label='Zeit $t$/ms',
-    y_label='ln$(1 - U/U_{max})$ bzw. ln$(U/U_{max})$',
+    xlabel='Zeit $t$/ms',
+    ylabel='ln$(1 - U/U_{max})$ bzw. ln$(U/U_{max})$',
     title='Auf und Entladung Kondensator',
     filename='Plots/WSK_2b.pdf',
     ymin=-5,
@@ -435,8 +438,8 @@ print_standard_table(
 
 plot_data(
     datasets=[datasets_2[0], datasets_2[1], datasets_2[2]],
-    x_label='Frequenz $log_{10}(f)/log_{10}(Hz)$',
-    y_label='Spannung $20log_{10}(U)$/db',
+    xlabel='Frequenz $log_{10}(f)/log_{10}(Hz)$',
+    ylabel='Spannung $20log_{10}(U)$/db',
     title='Hochpass',
     filename='Plots/WSK_HP.pdf',
     ymax=1,
@@ -448,8 +451,8 @@ plot_data(
 
 plot_data(
     datasets=[datasets_2[3], datasets_2[4], datasets_2[5]],
-    x_label='Frequenz $log_{10}(f)/log_{10}(Hz)$',
-    y_label='Spannung $20log_{10}(U)$/db',
+    xlabel='Frequenz $log_{10}(f)/log_{10}(Hz)$',
+    ylabel='Spannung $20log_{10}(U)$/db',
     title='Tiefpass',
     filename='Plots/WSK_TP.pdf',
     ymax = 0,
@@ -461,8 +464,8 @@ plot_data(
 
 plot_data(
     datasets=[datasets_2[-2], datasets_2[-1]],
-    x_label='Frequenz $log_{10}(f)/log_{10}(Hz)$',
-    y_label='Spannung $20log_{10}(U)$/db',
+    xlabel='Frequenz $log_{10}(f)/log_{10}(Hz)$',
+    ylabel='Spannung $20log_{10}(U)$/db',
     title='Bandpass',
     filename='Plots/WSK_BP.pdf',
     width=25,

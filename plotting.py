@@ -52,7 +52,7 @@ def varied_color(base_hex, color_seed=100, hue_range=0.04, index=0):
     return mcolors.to_hex([*rgb])
 
 
-def colors_from_groups(datasets, color_seed=None, bg_hex='#FFFFFF', hue_range=0.05):
+def colors_from_groups(datasets, color_seed=None, bg_hex="#FFFFFF", hue_range=0.05):
     """
     Assign colors to datasets based on their color groups or individual IDs.
     If a dataset has a 'color' set, that color is used.

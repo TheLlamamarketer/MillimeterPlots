@@ -1,8 +1,7 @@
-from matplotlib.pylab import f
 import numpy as np
 import sys
 sys.path.append('../Millimeterplots')
-from plotting_old import plot_data
+from Old.plotting_old import plot_data
 from find_interval import find_interval
 
 print()
@@ -231,7 +230,7 @@ print(f"$d_{{1/2,Fe}} = ({np.log(2)/slope_fe*10**3:.4f})mm$")
 import pandas as pd
 
 file_path = "Old/cs2.csv"
-from plotting_old import generate_contrasting_color
+from Old.plotting_old import generate_contrasting_color
 
 column_names = ["Kanalnummer", "Impulse", "Fit(Impulse)"]
 df = pd.read_csv(file_path, sep="\t", names=column_names)
@@ -261,9 +260,3 @@ data = {
 }
 # find_interval(data['Kanalnummer'], data['Impulse'], name='data', max_increment_height=100, max_increment_width=100)
 # plot_data_plus(ymin=0, ymax=224, ystep=20, xmin=1100, xmax=1700, xstep=50, x_label='Kanalnummer', y_label='Impulse', datasets=[{'xdata':data['Kanalnummer'], 'ydata': data['Impulse'], 'label':'Daten'}], filename='Plots/GAM_7.pdf')
-
-
-from mathy import sin, symbols, diff
-
-x, y, z = symbols("x y z", real=True)
-f = 4 * x * y + x * sin(z) + x**3 + z**8 * y

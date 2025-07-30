@@ -28,7 +28,9 @@ fit_limit = x[x <= divergence_angle]
 #print(divergence_angle )
 
 
-
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import matplotlib.pyplot as plt
 import pandas as pd
 from help import *

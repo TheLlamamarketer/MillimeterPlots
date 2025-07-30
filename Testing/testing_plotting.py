@@ -1,5 +1,5 @@
 import numpy as np
-from plotting_old import plot_data
+from Old.plotting_old import plot_data
 
 def generate_data(n_points, x_min, x_max, slope, intercept, noise_level):
     """Generate synthetic linear data with noise."""
