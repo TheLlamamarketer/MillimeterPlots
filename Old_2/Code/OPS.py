@@ -2,13 +2,16 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np
+import matplotlib.pyplot as plt
 from plotting import plot_data
 from scipy.interpolate import UnivariateSpline
+from scipy.optimize import curve_fit
+import colour
 import math
 from help import *
-from scipy.optimize import curve_fit
 from tables import *
 np.set_printoptions(legacy="1.25")
+from wavelength_colors import wavelength_to_rgb, load_cmap
 
 
 data = {
@@ -43,52 +46,21 @@ def sort_data(data, sorter, sorted_key, reverse=False):
 
 #sort_data(data, "angle_2", "wavelength_2")
 
-def wavelength_to_rgb(wavelength):
-    # Return black for wavelengths outside the visible range
-    if wavelength < 380 or wavelength > 780 or math.isnan(wavelength):
-        return (0, 0, 0)
+λ = np.array(data["wavelength"])
 
-    # Define RGB components based on wavelength ranges
-    if 380 <= wavelength < 440:
-        R = -(wavelength - 440) / (440 - 380)
-        G = 0.0
-        B = 1.0
-    elif 440 <= wavelength < 490:
-        R = 0.0
-        G = (wavelength - 440) / (490 - 440)
-        B = 1.0
-    elif 490 <= wavelength < 510:
-        R = 0.0
-        G = 1.0
-        B = -(wavelength - 510) / (510 - 490)
-    elif 510 <= wavelength < 580:
-        R = (wavelength - 510) / (580 - 510)
-        G = 1.0
-        B = 0.0
-    elif 580 <= wavelength < 645:
-        R = 1.0
-        G = -(wavelength - 645) / (645 - 580)
-        B = 0.0
-    elif 645 <= wavelength <= 780:
-        R = 1.0
-        G = 0.0
-        B = 0.0
-    else:
-        R = G = B = 0
+cmap, norm = load_cmap("colormaps/spectrum_wavelengths_0p01.npz")
 
-    # Adjust intensity for wavelengths at the edges of the visible spectrum
-    if 380 <= wavelength < 420:
-        factor = 0.3 + 0.7 * (wavelength - 380) / (420 - 380)
-    elif 645 <= wavelength <= 780:
-        factor = 0.3 + 0.7 * (780 - wavelength) / (780 - 645)
-    else:
-        factor = 1.0
+# print the colormap
 
-    R = int(np.clip(R * factor * 255, 0, 255))
-    G = int(np.clip(G * factor * 255, 0, 255))
-    B = int(np.clip(B * factor * 255, 0, 255))
-
-    return (R, G, B)
+plt.figure(figsize=(10, 2))
+gradient = np.linspace(norm.vmin, norm.vmax, 256).reshape(1, -1)
+im = plt.imshow(gradient, aspect='auto', cmap=cmap, norm=norm, extent=[norm.vmin, norm.vmax, 0, 1])
+plt.yticks([])
+plt.colorbar(im, label='Wavelength (nm)')
+plt.title('Wavelength Color Map')
+plt.xlabel('Wavelength (nm)')
+plt.tight_layout()
+plt.show()
 
 def generate_latex_color_definitions(data):
     """
@@ -290,10 +262,10 @@ plot_data(
             "color": "gray",
         },
     ],
-    x_label="relativer Ablenkwinkel γ/°", 
-    y_label="Wellenlänge λ/nm",
+    xlabel="relativer Ablenkwinkel γ/°", 
+    ylabel="Wellenlänge λ/nm",
     title="Kalibrierkurve (Spline) des Hg-Spektrums mit Zink-Spektrum",
-    color_seed=56,
+    color_seed=84,
     plot=False
 )
 
@@ -339,8 +311,8 @@ plot_data(
             "color": "gray"
         },
     ],
-    x_label="relativer Ablenkwinkel γ/°", 
-    y_label="Wellenlänge λ/nm",
+    xlabel="relativer Ablenkwinkel γ/°", 
+    ylabel="Wellenlänge λ/nm",
     title="Residuen des Spline Fits",
     color_seed=84,
     height = 10,
@@ -601,8 +573,8 @@ plot_data(
             "color": "black"
         },
     ],
-    x_label="Wellenlänge λ/µm",
-    y_label="Brechungsindex n",
+    xlabel="Wellenlänge λ/µm",
+    ylabel="Brechungsindex n",
     title="Brechungsindex n in Abhängigkeit der Wellenlänge λ",
     color_seed=67,
     plot=False
@@ -636,8 +608,8 @@ plot_data(
             "color": "black"
         },
     ],
-    x_label="relativer Ablenkwinkel γ/°", 
-    y_label="Wellenlänge λ/nm",
+    xlabel="relativer Ablenkwinkel γ/°", 
+    ylabel="Wellenlänge λ/nm",
     title="Residuen des Spline Fits",
     height = 10,
     color_seed=67,
@@ -678,8 +650,8 @@ plot_data(
         },
 
     ],
-    x_label="relativer Ablenkwinkel γ/°", 
-    y_label="Wellenlänge λ/nm",
+    xlabel="relativer Ablenkwinkel γ/°", 
+    ylabel="Wellenlänge λ/nm",
     title="Residuen des Sellmeier Fits",
     height = 10,
     color_seed=67,
@@ -791,8 +763,8 @@ plot_data(
             "ydata": None,
         }
     ],
-    x_label="Wellenlänge λ/µm",
-    y_label="dn/dλ",
+    xlabel="Wellenlänge λ/µm",
+    ylabel="dn/dλ",
     title="Ableitungen der Brechungsindizes",
     color_seed=67,
     plot=False
