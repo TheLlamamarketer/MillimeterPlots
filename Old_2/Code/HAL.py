@@ -165,7 +165,7 @@ plot_data(
             'fit': result_1_I.eval(x=x),
             'confidence': calc_CI(result_1_I, x, 3)
         }
-    ],
+    ], 
     y_label=r'$B \ T$',
     x_label=r'$U_H \ V$',
     title='Hallspannung in Magnetfeld',

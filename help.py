@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from lmfit import Model
 from decimal import Decimal, getcontext
+import logging 
 getcontext().prec = 50
 
 def FirstSignificant(x):
@@ -177,7 +178,6 @@ def calc_CI(result, xdata, sigmas=[1]):
 
             ci_list.append((lower, upper))
     except Exception as e:
-        import logging
         logging.error(f"Error calculating confidence intervals: {e}")
         for sigma in sigmas_list:
             ci_list.append((np.full_like(xdata, np.nan), np.full_like(xdata, np.nan)))

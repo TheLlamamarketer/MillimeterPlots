@@ -189,7 +189,7 @@ def plot_color_seeds(seed_range=(100, 120), num_datasets=3, bg_hex='#FFFFFF', hu
     ax.set_frame_on(False)
     
     plt.show()
-    
+
 def plot_data(filename, datasets, color_map=None, color_seed=203,
               title=None, xlabel=None, ylabel=None,
               legend_position='best', width=20, height=20,
@@ -236,11 +236,9 @@ def plot_data(filename, datasets, color_map=None, color_seed=203,
         if xdata is None or ydata is None or (not isinstance(xdata, (list, np.ndarray, float))) or (not isinstance(ydata, (list, np.ndarray, float))):
             continue
 
-        if isinstance(xdata, float):
-            xdata = [xdata]
-        if isinstance(ydata, float):
-            ydata = [ydata]
-        
+        if isinstance(xdata, float): xdata = [xdata]
+        if isinstance(ydata, float): ydata = [ydata]
+
         if isinstance(xdata[0], str):
             xdata = np.array(range(len(xdata)))
             ax.set_xticks(xdata)
@@ -326,7 +324,7 @@ def plot_data(filename, datasets, color_map=None, color_seed=203,
 
                 if isinstance(x_error, tuple) and len(x_error) == 2:
                     xerr_lower, xerr_upper = x_error
-                elif isinstance(x_error, float):
+                elif isinstance(x_error, (float, int)) or isinstance(x_error, list) and len(x_error) == 1:
                     xerr_lower = np.full_like(xdata, x_error)
                     xerr_upper = np.full_like(xdata, x_error)
                 else:

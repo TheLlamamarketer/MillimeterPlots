@@ -14,7 +14,7 @@ ILL_D65   = colour.SDS_ILLUMINANTS['D65']
 
 SHAPE = colour.SpectralShape(380, 780, 1)
 
-def set_base_resolution(step_nm=1.0, start=380.0, end=780.0):
+def set_base_resolution(step_nm=0.1, start=380.0, end=780.0):
     """Rebuild the precomputed XYZ tables on a new spectral grid.
     Use step_nm=0.5 or 0.1 if you want the CMF/illuminant interpolation
     done by 'colour' (Sprague) instead of our fast linear lookups."""
@@ -198,20 +198,26 @@ def lines_to_rgb(wavelengths_nm, intensities=1.0, **kwargs):
 def draw_lines_on_strip(img, grid, wls, amps, sigma_nm=0.05,
                         space="sRGB", brightness="equal", gamut_map="oklab"):
     col_wls = grid
+    # Ensure all wavelengths are floats, skip invalid ones
     for wl, amp in zip(wls, amps):
-        w = np.exp(-0.5*((col_wls - wl)/sigma_nm)**2)
-        col = wavelength_to_rgb(wl, encode=True, space=space,
+        try:
+            wl_float = float(wl)
+        except (ValueError, TypeError):
+            continue
+        if amp is None or amp <= 0.0:
+            continue
+        w = np.exp(-0.5*((col_wls - wl_float)/sigma_nm)**2)
+        col = wavelength_to_rgb(wl_float, encode=True, space=space,
                                 brightness=brightness, gamut_map=gamut_map)
         img += (amp * w)[None, :, None] * col[None, None, :]
     return np.clip(img, 0.0, 1.0)
 
 
-def show_source_strip(title, wls, amps, *, step=1, **kwargs):
+def show_source_strip(title, wls, amps, *, step=0.1, **kwargs):
     base, grid = render_spectrum(step=step, space="sRGB",
                                  brightness="equal",
                                  gamut_map=kwargs.get("gamut_map","oklab"))
     img  = (base * 0.1).copy()
-    dx = grid[1] - grid[0]
     img = draw_lines_on_strip(img, grid, wls, amps, space="sRGB", brightness="equal", gamut_map=kwargs.get("gamut_map", "oklab"))
 
     mix = lines_to_rgb(wls, amps, **kwargs)
