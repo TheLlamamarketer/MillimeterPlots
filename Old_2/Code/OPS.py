@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np
 import matplotlib.pyplot as plt
-from plotting import plot_data
+from plotting import plot_data, plot_color_seeds
 from scipy.interpolate import UnivariateSpline
 from scipy.optimize import curve_fit
 import colour
@@ -106,7 +106,6 @@ def apply_color_to_text(colors, wavelengths):
         colored_texts.append(f"\\textcolor{{{color_name}}}{{{color_text}}}")
 
     return colored_texts  # Replace original color texts with colorized versions
-
 
 #color_definitions = generate_latex_color_definitions(data["wavelength"])
 #for color_def in color_definitions:
@@ -565,7 +564,7 @@ plot_data(
     xlabel="Wellenlänge λ/µm",
     ylabel="Brechungsindex n",
     title="Brechungsindex n in Abhängigkeit der Wellenlänge λ",
-    color_seed=67,
+    color_seed=77,
     plot=False
 )
 
@@ -595,13 +594,18 @@ plot_data(
     ylabel="Wellenlänge λ/nm",
     title="Residuen des Spline Fits",
     height = 10,
-    color_seed=67,
+    color_seed=77,
     plot=False
 )
 
 plot_data(
     filename="Plots/OPS_4_2.pdf",
     datasets=[
+        {   
+            "xdata":[],
+            "ydata":[],
+            "color_group": "1"
+        },
         {
             "xdata": wavelength_smooth_3,
             "ydata": [0] * len(wavelength_smooth_3),
@@ -626,7 +630,7 @@ plot_data(
     ylabel="Wellenlänge λ/nm",
     title="Residuen des Sellmeier Fits",
     height = 10,
-    color_seed=67,
+    color_seed=77,
     plot=False
 )
 
@@ -708,7 +712,7 @@ plot_data(
     xlabel="Wellenlänge λ/µm",
     ylabel="dn/dλ",
     title="Ableitungen der Brechungsindizes",
-    color_seed=67,
+    color_seed=77,
     plot=False
 )
 
