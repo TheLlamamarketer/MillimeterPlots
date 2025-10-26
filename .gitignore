@@ -1,0 +1,33 @@
+# Python virtual environments (common names)
+bootstrap/.venv/
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+
+# pip cache and build artifacts
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+bootstrap/packages/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*.swo
+
+# Tests / local outputs
+coverage.xml
+htmlcov/
+
+# Optional: Git LFS managed binaries (if you use LFS, manage in .gitattributes)
+# *.whl
