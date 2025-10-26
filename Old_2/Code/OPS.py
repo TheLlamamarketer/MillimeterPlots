@@ -3,15 +3,15 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np
 import matplotlib.pyplot as plt
-from plotting import plot_data, plot_color_seeds
+from Functions.plotting import plot_data, plot_color_seeds
 from scipy.interpolate import UnivariateSpline
 from scipy.optimize import curve_fit
 import colour
 import math
-from help import *
-from tables import *
+from Functions.help import *
+from Functions.tables import *
 np.set_printoptions(legacy="1.25")
-from wavelength_colors import wavelength_to_rgb, load_cmap, show_source_strip
+from Functions.wavelength_colors import wavelength_to_rgb, load_cmap, show_source_strip
 
 
 data = {
@@ -59,7 +59,7 @@ def sort_data(data, sorter, sorted_key, reverse=False):
 
 λ = np.array(data["wavelength"])
 
-cmap, norm = load_cmap("colormaps/spectrum_wavelengths_0p01.npz")
+cmap, norm = load_cmap("Functions/colormaps/spectrum_wavelengths_0p01.npz")
 
 def show_wavelength_colormap(cmap, norm):
     plt.figure(figsize=(10, 2))
@@ -235,8 +235,6 @@ angle_smooth = np.linspace(min(x), max(x), 1000)
 
 
 
-
-
 plot_data(
     filename="Plots/OPS_1.pdf",
     datasets=[
@@ -277,7 +275,7 @@ plot_data(
     xlabel="relativer Ablenkwinkel γ/°", 
     ylabel="Wellenlänge λ/nm",
     title="Kalibrierkurve (Spline) des Hg-Spektrums mit Zink-Spektrum",
-    color_seed=84,
+    color_seed=79,
     plot=False
 )
 
@@ -321,7 +319,7 @@ plot_data(
     xlabel="relativer Ablenkwinkel γ/°", 
     ylabel="Wellenlänge λ/nm",
     title="Residuen des Spline Fits",
-    color_seed=84,
+    color_seed=79,
     height = 10,
     plot=False
 )

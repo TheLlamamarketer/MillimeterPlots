@@ -4,8 +4,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
-from plotting import plot_data
-from help import *
+from Functions.plotting import plot_data
+from Functions.help import *
 
 
 # Load the image in grayscale

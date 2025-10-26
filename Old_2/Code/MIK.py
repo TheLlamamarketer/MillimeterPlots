@@ -2,9 +2,9 @@ import numpy as np
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from plotting import plot_data
-from help import *
-from tables import print_standard_table, print_complex_table
+from Functions.plotting import plot_data
+from Functions.help import *
+from Functions.tables import print_standard_table, print_complex_table
 
 data = {
     "f": 4,
@@ -115,7 +115,8 @@ plot_data(
         {
             "xdata": beta,
             "ydata": a0 + b0 * beta,
-            "marker": None,
+            "marker": "None",
+            "line": "-",
         },
     ],
     plot=False
@@ -139,13 +140,15 @@ plot_data(
         {
             "xdata": data["Ex2"]["t"],
             "ydata": a + b * data["Ex2"]["t"],
-            "marker": None,
+            "marker": "None",
+            "line": "-",
         },
         {
             "xdata": data["Ex2"]["t"],
             "ydata": data["Ex2"]["Gamma_th"],
             "label": "Theoretical values",
             "marker": ".",
+            "line": "None",
         },
     ],
     plot=False
@@ -160,12 +163,12 @@ dd_height = d_height * np.sqrt((data["Ex3"]["ddiv_height"]/data["Ex3"]["div_heig
 width, dwidth,_ = round_val(d_width, dd_width, intermed=False)
 height, dheight,_ = round_val(d_height, dd_height, intermed=False)
 
-print(f"d_{{width}}={ data["Ex3"]["div_width"]} pm {data["Ex3"]["ddiv_width"]}div")
-print(f"d_{{thick}}={data["Ex3"]["div_height"]} pm {data["Ex3"]["ddiv_height"]}div")
+print(f"d_{{width}} = {data['Ex3']['div_width']} ± {data['Ex3']['ddiv_width']} div")
+print(f"d_{{thick}} = {data['Ex3']['div_height']} ± {data['Ex3']['ddiv_height']} div")
 
 
-print(f"d_{{width}}=({width} pm {dwidth})mm")
-print(f"d_{{thick}}=({height} pm {dheight})mm")
+print(f"d_{{width}} = ({width} ± {dwidth}) mm")
+print(f"d_{{thick}} = ({height} ± {dheight}) mm")
 
 
 
@@ -177,34 +180,34 @@ for i, val in data["Ex4"].items():
 
 
 headers = {
-    "A1": {"label": "{names}", "data": ["$A_1$", "$A_2$", "$B_1$", "$B_2$", "$B_3$"]},      
-    "A2": {"label": "{$diameter of pinholes (mm)$}", "data": [0.2, 1.0, 0.3, 0.6, 0.4]},
-    "B1": {"label": "{$d_{min}$ (mm)}", "data": [d_min(0.2), d_min(1.0), d_min(0.3), d_min(0.6), d_min(0.4)], "intermed": True},
+    "A1": {"label": "{names}", "data": ["$A_1$", "$A_2$", "$B_1$", "$B_2$", "$B_3$"]},
+    "A2": {"label": "{$diameter\\ of\\ pinholes\\ (mm)$}", "data": [0.2, 1.0, 0.3, 0.6, 0.4]},
+    "B1": {"label": "{$d_{min}\\ (mm)$}", "data": [d_min(0.2), d_min(1.0), d_min(0.3), d_min(0.6), d_min(0.4)], "intermed": True},
 }
 
 print_standard_table(
     data=data["Ex4"],
     headers=headers,
-    column_formats= ["2.1"] * len(headers),
-    caption="The collection of diameters of Pinholes used in the experiment, with the calculated minimum diameter for each.",
+    column_formats=["l", "2.1", "1.3"],  # CHANGED: first col is text
+    caption="Diameters of the pinholes and the calculated minimum diameter for each.",
     label="tab:ex4",
     show=True
 )
 
 
 headers = {
-    "beta": {"label": "{$\\beta$}", "err": 0.1},      
-    "g_abs": {"label": "{$\\tilde{g}$ (cm)}", "err": 0.1},
-    "g_rel": {"label": "{$g$ (cm)}", "err": 0.2},
-    "b": {"label": "{$b$ (cm)}", "err": 0.1},
-    "f": {"label": "{$f$ (cm)}", "err": data["Ex1"]["df"]},
+    "beta":  {"label": "{$\\beta$}", "err": 0.1},
+    "g_abs": {"label": "{$\\tilde{g}\\ (cm)$}", "err": 0.1},
+    "g_rel": {"label": "{$g\\ (cm)$}", "err": 0.2},
+    "b":     {"label": "{$b\\ (cm)$}", "err": 0.1},
+    "f":     {"label": "{$f\\ (cm)$}", "err": data["Ex1"]["df"]},
 }
 
 print_standard_table(
     data=data["Ex1"],
     headers=headers,
-    column_formats= ["2.1", "2.1", "2.1", "2.1", "2.1"],
-    caption="We use equation \\ref{eq:f} to calculate the focal length, dependent on the rest of the values, for the purpose of comparing it to the real $f$ of the lens used.",
+    column_formats=["2.1", "2.1", "2.1", "2.1", "2.1"],
+    caption="Using Eq.~\\ref{eq:f}, we compute the focal length from measured quantities and compare with the nominal $f$.",
     label="tab:ex1",
     show=False
 )
@@ -257,26 +260,28 @@ data_blocks_ex2 = [
 
 
 headers = {
-    "t": {"label": "{$t$ (cm)}", "repeat": False},
-    "x_abs": {"label": "{$\\tilde{x}$(cm)}", "repeat": True},      
-    "x_rel": {"label": "{$x$(cm)}", "repeat": True},
-    "G": {"label": "{$G$}"},
-    "B": {"label": "{$B$}"},
-    "beta": {"label": "{$\\beta_{ob}$}"},
-    "t/f": {"label": "{$t/f$}"},
+    "t":        {"label": "{$t$\\ (cm)}", "repeat": False},
+    "x_abs":    {"label": "{$\\tilde{x}$\\ (cm)}", "repeat": True},
+    "x_rel":    {"label": "{$x$\\ (cm)}", "repeat": True},
+    "G":        {"label": "{$G$}"},
+    "B":        {"label": "{$B$}"},
+    "beta":     {"label": "{$\\beta_{ob}$}"},
+    "t/f":      {"label": "{$t/f$}"},
     "Gamma_th": {"label": "{$\\Gamma_{th}$}", "repeat": True},
-    "Gamma_exp": {"label": "{$\\Gamma_{ex}$}"},
+    "Gamma_exp":{"label": "{$\\Gamma_{ex}$}"},
 }
 
 
 print_complex_table(
     data=data_blocks_ex2,
     headers=headers,
-    column_formats= ["2.1"] * len(headers),
-    caption="In the first area of the table $t$ is kept constant at $15cm$ and $x'$ is varied to find the ideal $x_{{best}}$ which is then selected in the second part, where now $t$ is varied. In general the magnification is calculated both from theoretical expectations and from experimental results.",
+    column_formats=["2.1"] * len(headers),
+    caption=(
+        "First, $t$ is fixed at $15\\,\\mathrm{cm}$ while $x'$ is varied to find $x_{\\mathrm{best}}$; "
+        "then $x'$ is fixed and $t$ is varied. Magnification is shown from both theory and experiment."
+    ),
     label="tab:ex2",
-    show=False
+    show=True
 )
-
 
 

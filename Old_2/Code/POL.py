@@ -33,9 +33,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import matplotlib.pyplot as plt
 import pandas as pd
-from help import *
-from plotting import plot_data
-from tables import print_standard_table
+from Functions.help import *
+from Functions.plotting import plot_data, DatasetSpec
+from Functions.tables import print_standard_table
 
 data0 = {
     "l":[0, 0.55, 1.1, 1.65, 2.2, 2.75, 3.3, 3.85, 4.4, 4.95, 5.5, 6.05, 6.6, 7.15, 7.7, 8.25, 8.8, 9.35, 9.9, 10.45, 10.6],
@@ -59,47 +59,22 @@ data0["l"] = [val/10 for val in data0["l"]]
 print(f"concetration: {round_val(conc, dconc, False)[0]} \pm {round_val(conc, dconc, False)[1]}")
 
 
-result0_sensor = lmfit(data0["l"], data0["angle_sensor"], yerr=0.5)
+result0_sensor = lmfit(np.array(data0["l"]), np.array(data0["angle_sensor"]), yerr=0.5)
 params0_sensor = extract_params(result0_sensor)
 
-result0_eye = lmfit(data0["l"], data0["angle_eye"], yerr=0.5)
+result0_eye = lmfit(np.array(data0["l"]), np.array(data0["angle_eye"]), yerr=0.5)
 params0_eye = extract_params(result0_eye)
 
-
-
 x = np.linspace(min(data0["l"]), max(data0["l"]), 300)
-datasets = [
-    {
-        "xdata": data0["l"],
-        "ydata": data0["angle_eye"],
-        "y_error": 0.5,
-        "x_error": data0["dl"],
-        "marker": ".",
-        "label": "Auge Daten",
-        "color_group": "eye",
-        "confidence": calc_CI(result0_eye, x),
-        "fit": lambda x: params0_eye['a'][0] + params0_eye['b'][0] * x,
-        "line_fit": "-",
-    },
-    {
-        "xdata": data0["l"],
-        "ydata": data0["angle_sensor"],
-        "y_error": 0.5,
-        "x_error": data0["dl"],
-        "marker": ".",
-        "label": "Sensor Daten",
-        "color_group": "sensor",
-        "confidence": calc_CI(result0_sensor, x),
-        "fit": lambda x: params0_sensor['a'][0] + params0_sensor['b'][0] * x,
-        "line_fit": "-",
-    }
-] 
+
+d1 = DatasetSpec(x=data0["l"], y=data0["angle_eye"], yerr=0.5, xerr=data0["dl"], label= "Auge Daten", color_group="eye", fit_x=x, fit_y=lambda x: params0_eye['a'][0] + params0_eye['b'][0] * x, confidence=calc_CI(result0_eye, x))
+d2 = DatasetSpec(x=data0["l"], y=data0["angle_sensor"], yerr=0.5, xerr=data0["dl"], label= "Sensor Daten", color_group="sensor", fit_x=x, fit_y=lambda x: params0_sensor['a'][0] + params0_sensor['b'][0] * x, confidence=calc_CI(result0_sensor, x))
 
 plot_data(
     filename="Plots/POL_0.pdf",
-    datasets=datasets,
-    x_label="Weg l/dm ",
-    y_label="Winkel α/°",
+    datasets=[d1, d2],
+    xlabel="Weg l/dm ",
+    ylabel="Winkel α/°",
     title="Polarimeter Daten",
     color_seed=54,
     plot=False
@@ -140,7 +115,7 @@ print(f"[\\alpha]_{{Auge}} = {round_val(spec_rotation_eye, dspec_rotation_eye, F
 data = {"dAngle": 0.5}
 
 for i in range(6):
-    data_i = pd.read_csv(f"out_test{i}.txt", header=None, names=["Angle", "dVolts", "Volts"])
+    data_i = pd.read_csv(f"Old_2/Data/POL_data/out_test{i}.txt", header=None, names=["Angle", "dVolts", "Volts"])
     data[str(i)] = {
         "Angle": data_i["Angle"] if i == 0 or i == 1 else data_i["Angle"] * 2,
         "dVolts": data_i["dVolts"],
@@ -230,7 +205,7 @@ print_standard_table(
     column_formats=["2.1"] * len(headers),
     caption="Daten Polarimeter mit veränderbarer Winkelauflösung",
     label="tab:A3",
-    show=True,
+    show=False,
 )
 
 
@@ -250,34 +225,24 @@ for i in range(1, 6):
     print(f"Minimum {i}: {round_val(minimum_angle, dminimum_angle, False)[0]} \pm {round_val(minimum_angle, dminimum_angle, False)[1]}")
 
 
-datasets = [{}]
+datasets = []
 for i in range(1,6):  # Adjust the range as needed
     x = np.linspace(data[str(i)]["Angle"].min(), data[str(i)]["Angle"].max(), 300)
 
     params = data[str(i)]["params0"]
     a, b, c = params['a'][0], params['b'][0], params['c'][0]
 
-    datasets.append({
-        "xdata": data[str(i)]["Angle"],
-        "ydata": data[str(i)]["Volts"],
-        "label": f"Messreie {i}",
-        "marker": ".",
-        "color_group": f"{i}",
-        "x_error": data['dAngle'],
-        "y_error": data[str(i)]["dVolts"],
-        "confidence": calc_CI(data[str(i)]["results0"], x),
-        "fit": (lambda x, a=a, b=b, c=c: a + b*x + c*x**2),
-    })
+    datasets.append(DatasetSpec(x=data[str(i)]["Angle"], y=data[str(i)]["Volts"], yerr=data[str(i)]["dVolts"], xerr=data['dAngle'], label=  f"Messreie {i}", color_group=f"{i}", fit_x=x, fit_y=(lambda x, a=a, b=b, c=c: a + b*x + c*x**2)))
 
+print(datasets)
 
 plot_data(
     filename="Plots/POL_1.pdf",
     datasets=datasets,
-    x_label="Winkel γ/°", 
-    y_label="Spannung U/V mit Offset",
+    xlabel="Winkel γ/°", 
+    ylabel="Spannung U/V mit Offset",
     title="Polarimeter Daten",
-    ymax=max(max_val_volt)+0.01,
-    ymin=min(min_val_volt)-0.01,
+    ylim=(min(min_val_volt)-0.01,max(max_val_volt)+0.01) ,
     color_seed=54,
     plot=False
 )
@@ -286,43 +251,22 @@ max_val_volt2 = [max(data[str(i)]['Volts']) for i in range(1, 6)]
 min_val_volt2 = [min(data[str(i)]['Volts']) for i in range(1, 6)]
 
 
-datasets = [{}]
+datasets = []
 for i in range(1,6):  # Adjust the range as needed
     x = np.linspace(data[str(i)]["Angle"].min(), data[str(i)]["Angle"].max(), 300)
     params = data[str(i)]["params0"]
     a, b, c = params['a'][0], params['b'][0], params['c'][0]
 
     y = (lambda x, a=a, b=b, c=c: a + b*x + c*x**2)
-
-    confidence = {
-        key: (
-            np.array(group[0]) - y(x),  # Lower bound
-            np.array(group[1]) - y(x)   # Upper bound
-        )
-        for key, group in calc_CI(data[str(i)]["results0"], x).items()
-    }
-
-    datasets.append({
-        "xdata": data[str(i)]["Angle"],
-        "ydata": data[str(i)]["Volts"] - y(data[str(i)]["Angle"]),
-        "label": f"Messreie {i}",
-        "marker": ".",
-        "color_group": f"{i}",
-        "x_error": data['dAngle'],
-        "y_error": data[str(i)]["dVolts"],
-        "confidence":confidence,
-    })
-
+    datasets.append(DatasetSpec(x=data[str(i)]["Angle"], y=data[str(i)]["Volts"] - y(data[str(i)]["Angle"]), yerr=data[str(i)]["dVolts"], xerr=data['dAngle'], label=  f"Messreie {i}", color_group=f"{i}", fit_x=x, fit_y=(lambda x, a=a, b=b, c=c: a + b*x + c*x**2), confidence=[(calc_CI(data[str(i)]["results0"], x)[0][0] - y(x), calc_CI(data[str(i)]["results0"], x)[0][1] - y(x)) ] ))
 plot_data(
     filename="Plots/POL_5.pdf",
     datasets=datasets,
-    x_label="Winkel α/°", 
-    y_label="Spannung U/V mit Offset",
+    xlabel="Winkel α/°", 
+    ylabel="Spannung U/V mit Offset",
     title="Polarimeter Daten",
-    xmax=45,
-    xmin=-30,
-    ymax= 0.1,
-    ymin=-0.4,
+    xlim=(-30, 45),
+    ylim=(-0.4,0.1),
     width=20,
     height=10,
     color_seed=54,
@@ -331,16 +275,7 @@ plot_data(
 )
 
 
-
-datasets = [
-    {
-        "xdata": [0,0],
-        "ydata": [min(min_val), max(max_val)],
-        "line": "--",
-        "marker":None,
-        "color": "black",
-    }
-]
+datasets = [DatasetSpec(x=[0,0], y=[min(min_val), max(max_val)], line="--", marker=None, color="black")]
 
 for i in range(1, 6):
     print(f"Minimum {i}: {round_val(data[str(i)]["params"]['a'][0], data[str(i)]["params"]['a'][1], False)[0]} \pm {round_val(data[str(i)]["params"]['a'][0], data[str(i)]["params"]['a'][1], False)[1]}")
@@ -351,33 +286,14 @@ for i in range(1, 6):  # Adjust the range as needed
     params = data[str(i)]["params"]
     a, b = params['a'][0], params['b'][0]
 
-
-    datasets.append({
-        "xdata": data[str(i)]["x"],
-        "ydata": data[str(i)]["y"],
-        "y_error": data['dAngle'],
-        "line": "None",
-        "marker": ".",
-        "color_group": f"Fit{i}",
-    })
-    datasets.append({
-        "xdata": data[str(i)]["x2"],
-        "ydata": data[str(i)]["y2"],
-        "y_error": data['dAngle'],
-        "line": "None",
-        "label": f"Messreihe {i}",
-        "marker": ".",
-        "color_group": f"Fit{i}",
-        "fit": (lambda x, a=a, b=b: a + b*x),
-        "confidence": calc_CI(data[str(i)]["results"], x),
-    })
-
+    datasets.append(DatasetSpec(x=data[str(i)]["x"], y=data[str(i)]["y"], yerr=data['dAngle'], color_group=f"Fit{i}"))
+    datasets.append(DatasetSpec(x=data[str(i)]["x2"], y=data[str(i)]["y2"], yerr=data['dAngle'], color_group=f"Fit{i}", label= f"Messreihe {i}", fit_y=(lambda x, a=a, b=b: a + b*x), fit_x=x, confidence= calc_CI(data[str(i)]["results"], x)))
 
 plot_data(
     filename="Plots/POL_2.pdf",
     datasets=datasets,
-    x_label="Wurzel der Spannung √U/√V", 
-    y_label="Winkel γ/°",
+    xlabel="Wurzel der Spannung √U/√V", 
+    ylabel="Winkel γ/°",
     title="Polarimeter Daten",
     color_seed=54,
     plot=False
@@ -543,61 +459,20 @@ print_standard_table(
     column_formats= ["2.1"] * len(headers),
     caption="Daten Polarimeter mit veränderbarer Konzentration",
     label="tab:A3_2",
-    show=True
+    show=False
 )
-
-datasets = [
-    {
-        "xdata": alphas,
-        "ydata": concentration_th,
-        "x_error": dalphas,
-        "y_error": dconcentration_th,
-        "line": "None",
-        "marker": ".",
-        "label": "Theoretisch ermittelte c",
-        "fit": (lambda x, b=b3:b*x),
-    },
-    {
-        "xdata": alphas,
-        "ydata": c_exp_1,
-        "x_error": dalphas,
-        "y_error":dc_exp_1,
-        "line": "None",
-        "marker": ".",
-        "fit": (lambda x, b=b4_1:b*x),
-        "label": "Experimentell ermittelte Konzentration m/V",
-        #"confidence": calc_CI(result4_1, x),
-    },
-    {
-        "xdata": alphas2,
-        "ydata": c_exp_1,
-        "x_error": dalphas2,
-        "y_error":dc_exp_1,
-        "line": "None",
-        "marker": ".",
-        "fit": (lambda x, b=b4_0:b*x),
-        "label": "Experimentell ermittelte Konzentration m/V mit manuellen Winkeln",
-        #"confidence": calc_CI(result4_1, x),
-    },
-    {
-        "xdata": alphas,
-        "ydata": c_exp_2,
-        "x_error": dalphas,
-        "y_error":dc_exp_2,
-        "line": "None",
-        "marker": ".",
-        "fit": (lambda x, b=b4_2:b*x),
-        "label": "Experimentell ermittelte Konzentration mit korrigierten Werten",
-        #"confidence": calc_CI(result4_2, x),
-    },
+datasets=[
+    DatasetSpec(x= alphas, y= concentration_th, xerr= dalphas, yerr= dconcentration_th, label= "Theoretisch ermittelte c", fit_y= (lambda x, b=b3:b*x), fit_x=alphas),
+    DatasetSpec(x= alphas, y= c_exp_1, xerr= dalphas, yerr= dalphas, label= "Experimentell ermittelte Konzentration m/V", fit_y= (lambda x, b=b4_1:b*x), fit_x=alphas),
+    DatasetSpec(x= alphas2, y= c_exp_1, xerr= dalphas2, yerr= dc_exp_1, label= "Experimentell ermittelte Konzentration m/V mit manuellen Winkeln", fit_y= (lambda x, b=b4_0:b*x), fit_x=alphas),
+    DatasetSpec(x= alphas, y= c_exp_2, xerr= dalphas, yerr= dc_exp_2, label= "Experimentell ermittelte Konzentration mit korrigierten Werten", fit_y= (lambda x, b=b4_2:b*x), fit_x=alphas),
 ]
-
 
 plot_data(
     filename="Plots/POL_3.pdf",
     datasets=datasets,
-    x_label="Winkel α/°", 
-    y_label="concentration c/g mL^-1",
+    xlabel="Winkel α/°", 
+    ylabel="concentration c/g mL^-1",
     title="Polarimeter Daten",
     color_seed=54,
     plot=False

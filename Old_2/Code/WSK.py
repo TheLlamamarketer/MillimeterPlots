@@ -2,9 +2,9 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np
-from plotting import plot_data
-from tables import *
-from help import *
+from Functions.plotting import plot_data
+from Functions.tables import *
+from Functions.help import *
 from decimal import Decimal
 
 data = {

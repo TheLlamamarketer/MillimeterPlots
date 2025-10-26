@@ -2,7 +2,7 @@ import numpy as np
 import sys
 sys.path.append('../Millimeterplots')
 from Old.plotting_old import plot_data
-from find_interval import find_interval
+from Functions.find_interval import find_interval
 
 print()
 

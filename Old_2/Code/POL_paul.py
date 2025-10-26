@@ -36,8 +36,8 @@ fit_limit = x[x <= divergence_angle]
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from help import *
-from plotting import plot_data
+from Functions.help import *
+from Functions.plotting import plot_data, DatasetSpec
 
 data0 = {
     "l":[ 68, 62, 56, 49, 43, 37, 34, 30, 25, 20, 16, 12, 8 , 3 , 0 ],
@@ -70,8 +70,8 @@ datasets = [
 plot_data(
     filename="Plots/POL_0_Paul.pdf",
     datasets=datasets,
-    x_label="Länge l/dm",
-    y_label="Winkel α/°",
+    xlabel="Länge l/dm",
+    ylabel="Winkel α/°",
     title="Polarimeter Daten",
     color_seed=25,
     plot=False
@@ -197,8 +197,8 @@ for i in range(4):  # Adjust the range as needed
 plot_data(
     filename="Plots/POL_1_Paul.pdf",
     datasets=datasets,
-    x_label="Winkel γ/°", 
-    y_label="Licht E/lux mit Offset",
+    xlabel="Winkel γ/°", 
+    ylabel="Licht E/lux mit Offset",
     title="Polarimeter Daten",
     ymax=max(max_val_volt)+5,
     ymin=min(min_val_volt)-5,
@@ -242,8 +242,8 @@ for i in range(4):  # Adjust the range as needed
 plot_data(
     filename="Plots/POL_5_Paul.pdf",
     datasets=datasets,
-    x_label="Winkel α/°", 
-    y_label="Licht E/lux mit Offset",
+    xlabel="Winkel α/°", 
+    ylabel="Licht E/lux mit Offset",
     title="Residuen der Polarimeter Daten",
     xmax=30,
     xmin=-45,
@@ -298,8 +298,8 @@ for i in range(4):  # Adjust the range as needed
 plot_data(
     filename="Plots/POL_2_Paul.pdf",
     datasets=datasets,
-    x_label="Wurzel der Lichtintensität $\\sqrt{E}/\\sqrt{lux}$", 
-    y_label="Winkel γ/°",
+    xlabel="Wurzel der Lichtintensität $\\sqrt{E}/\\sqrt{lux}$", 
+    ylabel="Winkel γ/°",
     color_seed=54,
     plot=False
 )
@@ -483,8 +483,8 @@ datasets = [
 plot_data(
     filename="Plots/POL_3_Paul.pdf",
     datasets=datasets,
-    x_label="Winkel α/°", 
-    y_label="concentration c/g mL^-1",
+    xlabel="Winkel α/°", 
+    ylabel="concentration c/g mL^-1",
     title="Polarimeter Daten",
     color_seed=54,
     plot=True

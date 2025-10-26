@@ -1,0 +1,7 @@
+numpy
+matplotlib
+pandas
+lmfit
+colour
+scipy
+opencv-python

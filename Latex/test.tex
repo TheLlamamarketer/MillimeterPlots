@@ -1,0 +1,182 @@
+\documentclass{article}
+\usepackage[table]{xcolor}
+\usepackage{colortbl}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage{amssymb}
+
+\sisetup{
+    table-format=3.2,
+    round-mode=places,
+    round-precision=2
+}
+
+
+\begin{document}
+
+\begin{table}[ht!]
+    \centering
+    \caption{A1a: corrected Hall voltage, magnet current, and field}
+    \begin{tabular}{| S[table-format=2.1] | S[table-format=1.3] | S[table-format=2.2] |}
+    \toprule
+    {$U_H/mV$} & {$I_B/A$} & {$B/mT$} \\
+    \midrule
+    {$9.0 \pm 0.1$} & {$0.498 \pm 0.009$} & {$72 \pm 6$} \\
+    {$10.21 \pm 0.07$} & {$0.58 \pm 0.01$} & {$84 \pm 6$} \\
+    {$11.36 \pm 0.08$} & {$0.66 \pm 0.02$} & {$94 \pm 6$} \\
+    {$12.48 \pm 0.08$} & {$0.72 \pm 0.02$} & {$103 \pm 6$} \\
+    {$13.71 \pm 0.08$} & {$0.8 \pm 0.6$} & {$110 \pm 70$} \\
+    {$14.95 \pm 0.09$} & {$0.87 \pm 0.02$} & {$124 \pm 6$} \\
+    {$16.34 \pm 0.09$} & {$0.95 \pm 0.02$} & {$135 \pm 6$} \\
+    {$17.55 \pm 0.09$} & {$1.03 \pm 0.02$} & {$144 \pm 6$} \\
+    {$18.9 \pm 0.1$} & {$1.10 \pm 0.02$} & {$155 \pm 6$} \\
+    {$20.3 \pm 0.1$} & {$1.18 \pm 0.02$} & {$166 \pm 6$} \\
+    {$21.4 \pm 0.2$} & {$1.25 \pm 0.02$} & {$175 \pm 6$} \\
+    {$22.7 \pm 0.2$} & {$1.33 \pm 0.02$} & {$185 \pm 6$} \\
+    {$24.1 \pm 0.2$} & {$1.40 \pm 0.02$} & {$196 \pm 6$} \\
+    {$25.3 \pm 0.2$} & {$1.48 \pm 0.02$} & {$206 \pm 6$} \\
+    {$26.6 \pm 0.2$} & {$1.55 \pm 0.07$} & {$220 \pm 10$} \\
+    \bottomrule
+    \end{tabular}
+    \label{tab:A1a}
+\end{table}
+
+\begin{table}[ht!]
+    \centering
+    \caption{A1b: source current vs corrected Hall voltage}
+    \begin{tabular}{| S[table-format=2.1] | S[table-format=2.1] |}
+    \toprule
+    {$U_H/mV$} & {$I_S/mA$} \\
+    \midrule
+    {$26.5 \pm 0.2$} & {$20.0 \pm 0.5$} \\
+    {$25.7 \pm 0.2$} & {$19.0 \pm 0.5$} \\
+    {$23.8 \pm 0.1$} & {$18.0 \pm 0.5$} \\
+    {$22.8 \pm 0.2$} & {$17.0 \pm 0.5$} \\
+    {$21.12 \pm 0.09$} & {$16.0 \pm 0.5$} \\
+    {$18.4 \pm 0.2$} & {$14.0 \pm 0.5$} \\
+    {$16.98 \pm 0.07$} & {$13.0 \pm 0.5$} \\
+    {$14.08 \pm 0.06$} & {$11.0 \pm 0.5$} \\
+    {$12.42 \pm 0.05$} & {$10.0 \pm 0.5$} \\
+    {$10.91 \pm 0.05$} & {$9.0 \pm 0.5$} \\
+    {$9.02 \pm 0.04$} & {$8.0 \pm 0.5$} \\
+    {$8.76 \pm 0.08$} & {$7.0 \pm 0.5$} \\
+    {$6.94 \pm 0.03$} & {$6.0 \pm 0.5$} \\
+    {$5.67 \pm 0.03$} & {$5.0 \pm 0.5$} \\
+    {$2.76 \pm 0.06$} & {$3.0 \pm 0.5$} \\
+    {$0.98 \pm 0.02$} & {$2.0 \pm 0.5$} \\
+    \bottomrule
+    \end{tabular}
+    \label{tab:A1b}
+\end{table}
+
+\begin{table}[ht!]
+    \centering
+    \caption{Diameters of the pinholes and the calculated minimum diameter for each.}
+    \begin{tabular}{| l | S[table-format=2.1] | S[table-format=1.3] |}
+    \toprule
+    {names} & {$diameter\ of\ pinholes\ (mm)$} & {$d_{min}\ (mm)$} \\
+    \midrule
+    {$A_1$} & {$0.2$} & {$0.22$} \\
+    {$A_2$} & {$1.0$} & {$0.044$} \\
+    {$B_1$} & {$0.3$} & {$0.15$} \\
+    {$B_2$} & {$0.6$} & {$0.073$} \\
+    {$B_3$} & {$0.4$} & {$0.11$} \\
+    \bottomrule
+    \end{tabular}
+    \label{tab:ex4}
+\end{table}
+
+
+\begin{table}[ht!]
+    \centering
+    \caption{First, $t$ is fixed at $15\,\mathrm{cm}$ while \ensuremath{x^\prime} is varied to find $x_{\mathrm{best}}$; then \ensuremath{x^\prime} is fixed and $t$ is varied. Magnification is shown from both theory and experiment.}
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{| S[table-format=2.1] | S[table-format=2.1] | S[table-format=2.1] | S[table-format=2.1] | S[table-format=2.1] | S[table-format=2.1] | S[table-format=2.1] | S[table-format=2.1] | S[table-format=2.1] |}
+    \toprule
+    {$t$\ (cm)} & {$\tilde{x}$\ (cm)} & {$x$\ (cm)} & {$G$} & {$B$} & {$\beta_{ob}$} & {$t/f$} & {$\Gamma_{th}$} & {$\Gamma_{ex}$} \\
+    \midrule
+    {$15.0 \pm 0.1$} & {$16.9 \pm 0.1$} & {$12.0 \pm 0.2$} & {$3.0 \pm 0.5$} & {$10.0$} & {$3.3 \pm 0.6$} & {$3.75 \pm 0.03$} & {$27.2 \pm 0.2$} & {$24 \pm 5$} \\
+    {} & {$18.3 \pm 0.1$} & {$13.4 \pm 0.2$} & {$2.5 \pm 0.5$} & {$10.0$} & {$4.0 \pm 0.8$} & {$3.75 \pm 0.03$} & {$27.2 \pm 0.2$} & {$29 \pm 6$} \\
+    {} & {$21.0 \pm 0.1$} & {$16.1 \pm 0.2$} & {$1.5 \pm 0.5$} & {$10.0$} & {$7 \pm 3$} & {$3.75 \pm 0.03$} & {$27.2 \pm 0.2$} & {$50 \pm 20$} \\
+    \midrule
+    {$20.0 \pm 0.1$} & {$18.3 \pm 0.1$} & {$13.4 \pm 0.2$} & {$1.5 \pm 0.5$} & {$10.0$} & {$7 \pm 3$} & {$5.00 \pm 0.03$} & {$36.2 \pm 0.2$} & {$50 \pm 20$} \\
+    {$30.0 \pm 0.1$} & {$18.3 \pm 0.1$} & {$13.4 \pm 0.2$} & {$5.0 \pm 0.5$} & {$50.0$} & {$10 \pm 1$} & {$7.50 \pm 0.03$} & {$54.4 \pm 0.2$} & {$72 \pm 8$} \\
+    \bottomrule
+    \end{tabular}
+    }
+    \label{tab:ex2}
+\end{table}
+
+
+\begin{table}[ht!]
+    \centering
+    \caption{Carrier density $n$ and mobility $\mu$ for selected materials.}
+    \begin{tabular}{| >{\columncolor{black!20}}l | S[table-format=2.2] | S[table-format=4.0] |}
+    \toprule
+    \multicolumn{1}{|c|}{ID} & \multicolumn{2}{|c|}{Transport} \\
+    \midrule
+    {Material} & {$n$ ($\mathrm{cm^{-3}}$)} & {$\mu$ ($\mathrm{cm^2/Vs}$)} \\
+    \midrule
+    {Al} & {$(27.1 \pm 1.0)e18$} & {$1500 \pm 50$} \\
+    {Cu} & {$(84.9 \pm 5.0)e21$} &  \\
+    {Si} & {$(20.0 \pm 1.0)e9$} &  \\
+    {Ge} & {$(23.0 \pm 1.0)e12$} &  \\
+    \bottomrule
+    \end{tabular}
+    \label{tab:transport}
+\end{table}
+
+\begin{table}[ht!]
+    \centering
+    \caption{Two runs with per-block uncertainties (block errors override header errors).}     
+    \begin{tabular}{| S[table-format=2.0] | S[table-format=2.2] | >{\columncolor{black!20}}l |}
+    \toprule
+    \multicolumn{2}{|c|}{Run A} & \multicolumn{1}{|c|}{Config} \\
+    \midrule
+    {$T$ (K)} & {$R$ (\si{\ohm})} & {Bias} \\
+    \midrule
+    {$300.0 \pm 0.2$} & {$10.010 \pm 0.050$} & {} \\
+    {$320.0 \pm 0.2$} & {$9.560 \pm 0.050$} & {} \\
+    {$340.0 \pm 0.2$} & {$9.120 \pm 0.040$} & {} \\
+    \midrule
+    {$360.0 \pm 0.2$} & {$8.790 \pm 0.020$} & {$1$} \\
+    {$380.0 \pm 0.2$} & {$8.510 \pm 0.020$} & {} \\
+    \bottomrule
+    \end{tabular}
+    \label{tab:runs}
+\end{table}
+
+
+\pagebreak
+
+
+
+\[
+\textbf{Claim.}\quad \sum_{k=0}^{N-1} \mathbf v_k= \mathbf 0,\qquad
+\mathbf v_k = R\big(\cos\phi_k\,\hat{\mathbf x}+\sin\phi_k\,\hat{\mathbf y}\big),\quad N\ge2.
+\]
+
+
+\textbf{Proof 1 (roots of unity).}
+Identify \(\mathbf v_k\) with the complex number \(R e^{i\phi_k}=R e^{i\phi_0}\omega^k\),
+where \(\omega=e^{2\pi i/N}\).
+Then
+\[
+\sum_{k=0}^{N-1}\mathbf v_k
+= R e^{i\phi_0}\sum_{k=0}^{N-1}\omega^k
+= R e^{i\phi_0}\,\frac{1-\omega^{N}}{1-\omega}=0,
+\]
+since \(\omega^N=1\) and \(\omega\ne1\) for \(N\ge2\).
+Thus the vector sum is \(\mathbf 0\).
+
+\textbf{Proof 2 (rotation symmetry).}
+Let \(S=\sum_{k=0}^{N-1}\mathbf v_k\).
+Rotate every vector by \(2\pi/N\) (which permutes the set), so the sum is unchanged:
+\(S\) maps to \(e^{i(2\pi/N)}S\) but must still equal \(S\).
+Hence \((1-e^{i2\pi/N})S=\mathbf 0\).
+For \(N\ge2\), \(e^{i2\pi/N}\ne1\), so \(S=\mathbf 0\).
+
+\(\square\)
+
+\end{document}

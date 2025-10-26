@@ -3,9 +3,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np
 from collections import defaultdict
-from plotting import plot_data, plot_color_seeds
-from tables import *
-from help import *
+from Functions.plotting import plot_data, plot_color_seeds
+from Functions.tables import *
+from Functions.help import *
 from scipy.interpolate import UnivariateSpline, PPoly
 
 print('\n')
