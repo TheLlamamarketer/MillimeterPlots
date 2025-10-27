@@ -1,0 +1,157 @@
+% $ biblatex auxiliary file $
+% $ biblatex bbl format version 3.2 $
+% Do not modify the above lines!
+%
+% This is an auxiliary file used by the 'biblatex' package.
+% This file may safely be deleted. It will be recreated by
+% biber as required.
+%
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+
+
+\refsection{0}
+  \datalist[entry]{nyt/global//global/global}
+    \entry{FHZ-Skript}{manual}{}
+      \name{author}{1}{}{%
+        {{un=0,uniquepart=base,hash=5376feae68abc454852e7b2ed5f225e1}{%
+           family={Freie\bibnamedelimb Universität\bibnamedelimb Fachbereich\bibnamedelima Physik},
+           familyi={F\bibinitperiod\bibinitdelim U\bibinitperiod\bibinitdelim F\bibinitperiod\bibinitdelim P\bibinitperiod},
+           given={Berlin},
+           giveni={B\bibinitperiod},
+           givenun=0}}%
+      }
+      \strng{namehash}{5376feae68abc454852e7b2ed5f225e1}
+      \strng{fullhash}{5376feae68abc454852e7b2ed5f225e1}
+      \strng{bibnamehash}{5376feae68abc454852e7b2ed5f225e1}
+      \strng{authorbibnamehash}{5376feae68abc454852e7b2ed5f225e1}
+      \strng{authornamehash}{5376feae68abc454852e7b2ed5f225e1}
+      \strng{authorfullhash}{5376feae68abc454852e7b2ed5f225e1}
+      \field{sortinit}{F}
+      \field{sortinithash}{2638baaa20439f1b5a8f80c6c08a13b4}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{note}{Accessed: 21.02.2025}
+      \field{title}{FHZ Skript}
+      \field{year}{2025}
+      \verb{urlraw}
+      \verb https://fu-berlin.blackboard.com/ultra/courses/_195116_1/cl/outline
+      \endverb
+      \verb{url}
+      \verb https://fu-berlin.blackboard.com/ultra/courses/_195116_1/cl/outline
+      \endverb
+    \endentry
+    \entry{Aufgaben}{misc}{}
+      \field{sortinit}{G}
+      \field{sortinithash}{32d67eca0634bf53703493fb1090a2e8}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{}
+      \field{labeltitlesource}{title}
+      \field{note}{Accessed: 22.02.2025}
+      \field{title}{GPII FHZ Aufgaben}
+      \field{year}{2025}
+      \verb{urlraw}
+      \verb https://fu-berlin.blackboard.com/ultra/courses/_195116_1/cl/outline
+      \endverb
+      \verb{url}
+      \verb https://fu-berlin.blackboard.com/ultra/courses/_195116_1/cl/outline
+      \endverb
+    \endentry
+    \entry{BohrModell}{misc}{}
+      \name{author}{1}{}{%
+        {{un=0,uniquepart=base,hash=e73ab981b02cc90de47be12a266841d6}{%
+           family={JabberWok},
+           familyi={J\bibinitperiod}}}%
+      }
+      \strng{namehash}{e73ab981b02cc90de47be12a266841d6}
+      \strng{fullhash}{e73ab981b02cc90de47be12a266841d6}
+      \strng{bibnamehash}{e73ab981b02cc90de47be12a266841d6}
+      \strng{authorbibnamehash}{e73ab981b02cc90de47be12a266841d6}
+      \strng{authornamehash}{e73ab981b02cc90de47be12a266841d6}
+      \strng{authorfullhash}{e73ab981b02cc90de47be12a266841d6}
+      \field{sortinit}{J}
+      \field{sortinithash}{b2f54a9081ace9966a7cb9413811edb4}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{title}{File:Bohr atom model.svg}
+      \field{year}{2007}
+      \verb{urlraw}
+      \verb https://commons.wikimedia.org/w/index.php?curid=2639910
+      \endverb
+      \verb{url}
+      \verb https://commons.wikimedia.org/w/index.php?curid=2639910
+      \endverb
+    \endentry
+    \entry{Franck-Hertz-Kurve-Quecksilber}{misc}{}
+      \name{author}{1}{}{%
+        {{un=0,uniquepart=base,hash=9c677286866aad38f8e9b660f5411814}{%
+           family={Wikipedia},
+           familyi={W\bibinitperiod}}}%
+      }
+      \strng{namehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{fullhash}{9c677286866aad38f8e9b660f5411814}
+      \strng{bibnamehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{authorbibnamehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{authornamehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{authorfullhash}{9c677286866aad38f8e9b660f5411814}
+      \field{extraname}{1}
+      \field{sortinit}{W}
+      \field{sortinithash}{4315d78024d0cea9b57a0c6f0e35ed0d}
+      \field{extradate}{1}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{title}{File:Franck-Hertz de.svg}
+      \field{year}{2006}
+      \verb{urlraw}
+      \verb https://commons.wikimedia.org/w/index.php?curid=745720
+      \endverb
+      \verb{url}
+      \verb https://commons.wikimedia.org/w/index.php?curid=745720
+      \endverb
+    \endentry
+    \entry{SchaltbildFranckHertzVersuch}{misc}{}
+      \name{author}{1}{}{%
+        {{un=0,uniquepart=base,hash=9c677286866aad38f8e9b660f5411814}{%
+           family={Wikipedia},
+           familyi={W\bibinitperiod}}}%
+      }
+      \strng{namehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{fullhash}{9c677286866aad38f8e9b660f5411814}
+      \strng{bibnamehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{authorbibnamehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{authornamehash}{9c677286866aad38f8e9b660f5411814}
+      \strng{authorfullhash}{9c677286866aad38f8e9b660f5411814}
+      \field{extraname}{2}
+      \field{sortinit}{W}
+      \field{sortinithash}{4315d78024d0cea9b57a0c6f0e35ed0d}
+      \field{extradate}{2}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{title}{File:Schaltbild Franck Hertz Versuch.png}
+      \field{year}{2006}
+      \verb{urlraw}
+      \verb https://commons.wikimedia.org/w/index.php?curid=780450
+      \endverb
+      \verb{url}
+      \verb https://commons.wikimedia.org/w/index.php?curid=780450
+      \endverb
+    \endentry
+  \enddatalist
+\endrefsection
+\endinput
+
