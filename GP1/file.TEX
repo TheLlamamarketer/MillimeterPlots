@@ -1,0 +1,350 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,top=2cm,bottom=2cm,left=3cm,right=3cm,marginparwidth=1.75cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[german]{babel}
+\usepackage{csquotes}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{amsmath, amsthm, amssymb}
+\usepackage{array, booktabs} 
+\usepackage[table,xcdraw]{xcolor}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+\usepackage{siunitx} 
+\usepackage{pgffor}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{multicol}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{float}
+\usepackage{tabularray}
+
+\usepackage{textcomp}
+\usepackage{gensymb}
+\usepackage{newunicodechar}
+\newunicodechar{°}{\degree}
+
+\definecolor{mycolor}{RGB}{10, 173, 97}  % Green
+\definecolor{color_577}{RGB}{244, 255, 0}
+\definecolor{color_546}{RGB}{131, 255, 0}
+\definecolor{color_579}{RGB}{251, 255, 0}
+\definecolor{color_708}{RGB}{171, 0, 0}
+\definecolor{color_491}{RGB}{0, 255, 234}
+\definecolor{color_623}{RGB}{255, 84, 0}
+\definecolor{color_496}{RGB}{0, 255, 178}
+\definecolor{color_690}{RGB}{194, 0, 0}
+\definecolor{color_435}{RGB}{17, 0, 255}
+\definecolor{color_404}{RGB}{109, 0, 186}
+\definecolor{color_407}{RGB}{107, 0, 200}
+\definecolor{color_671}{RGB}{219, 0, 0}
+
+\definecolor{color_481}{RGB}{0, 209, 255}
+\definecolor{color_518}{RGB}{29, 255, 0}
+\definecolor{color_468}{RGB}{0, 142, 255}
+\definecolor{color_472}{RGB}{0, 164, 255}
+\definecolor{color_602}{RGB}{255, 168, 0}
+\definecolor{color_636}{RGB}{255, 32, 0}
+
+
+\usepackage[backend=biber, style=authoryear, citestyle=authoryear]{biblatex}
+\addbibresource{Quellen.bib}
+
+
+\begin{document}
+
+\newcommand{\ColorTextByWavelength}[2]{%
+    \WaveToPS{#1}%
+    \textcolor{lambda}{#2}%
+}
+
+\begin{titlepage}
+   \begin{center}
+       \vspace*{1cm}
+
+       {\huge\bfseries Versuchsprotokoll}
+
+       \vspace{1cm}
+
+{\LARGE Polarimetrie}
+
+\vspace{0.5cm}
+
+{\Large POL}
+
+\vspace{2cm}
+
+ {Versuchsprotokoll von}
+ \vspace{0.5cm}
+ 
+{\large Alexander Ilyin, Paul Edinger}
+
+\vspace{0,5cm}
+
+{\small ilyia05@zedat.fu-berlin.de, paul.se@fu-berlin.de}
+
+\vspace{1cm}
+
+
+\vspace{2cm}
+
+{\small Tutor*in: }
+
+\vfill
+
+{\small Physikalisches Grundpraktikum II, WS 2024/25}
+
+ \vspace{0.5cm}
+ 
+ {\small Berlin, 29.11.2024}
+ 
+ \vspace{0.5cm}
+ 
+ {\small Freie Universität Berlin}
+ 
+ \vspace{0.5cm}
+ 
+ {\small Fachbereich Physik}
+ 
+ \vspace{0.5cm}
+
+
+\vspace{3cm}
+            
+   \end{center}
+\end{titlepage}
+
+
+\tableofcontents
+
+\newpage
+\section{Einführung}
+Polarisation ist eine fundamentale Eigenschaft von Licht, die seine Schwingungsrichtung beschreibt. Durch gezielte Manipulation von Licht über Mechanismen wie Filterung, Reflexion oder optische Aktivität kann Polarisation erzeugt oder verändert werden. Dies ermöglicht Anwendungen, die von der Lichtanalyse über optische Technologien bis hin zur Kommunikation reichen. Polarisierende Sonnenbrillen nutzen sie beispielsweise, um Blendung zu reduzieren, indem sie reflektiertes Licht von horizontalen Oberflächen wie Wasser oder Straßen filtern. Auch 3D-Kinobrillen machen sich Polarisation zunutze, indem sie das Licht für das linke und rechte Auge unterschiedlich polarisieren und so den 3D-Effekt erzeugen. In der drahtlosen Kommunikation sowie in der Radar-Technik werden Polarisationsfilter verwendet, um Störungen zu minimieren und Signale klarer zu machen. Darüber hinaus ist Polarisation ein wichtiges Werkzeug in der Wissenschaft, beispielsweise zur Untersuchung der Struktur von Molekülen, der Materialeigenschaften oder zur Analyse des Lichts aus dem Weltall. 
+
+Die Polarimetrie ist dabei ein Messverfahren zur Bestimmung der optischen Aktivität von Substanzen. Optisch aktive Substanzen, wie viele Zucker, Aminosäuren und andere chirale Moleküle, besitzen die Fähigkeit, die Ebene von linear polarisiertem Licht zu drehen. Diese Eigenschaft ist eng mit der molekularen Struktur der Substanz verbunden und wird in der Polarimetrie durch die spezifische Drehung charakterisiert.
+
+Ziel des vorliegenden Versuchs ist es, ein solches Polarimeter zu bauen und die Abhängigkeit des Drehwinkels von der Füllhöhe und von der Konzentration einer Zuckerlösung zu untersuchen.
+
+\section{Physikalische Grundlagen}
+
+Polarisation beschreibt die Richtung der Schwingung einer elektromagnetischen Welle, insbesondere in Bezug auf die Ausrichtung des elektrischen Feldvektors. Da Licht eine transversale Welle ist, schwingen das elektrische Feld $\vec{E}$ und das magnetische Feld $\vec{B}$ senkrecht zur Ausbreitungsrichtung der Welle (siehe Abbildung \ref{fig:polarisation}). Im Falle von natürlichem Licht, wie Sonnenlicht, das als unpolarisiertes Licht bezeichnet wird, schwingen die elektrischen Felder in allen möglichen Richtungen senkrecht zur Ausbreitungsrichtung. Im Gegensatz dazu hat polarisiertes Licht eine feste Schwingungsebene des elektrischen Feldes, die durch spezifische Mechanismen erzeugt werden kann, beispielsweise durch Filterung, Reflexion oder optische Aktivität.
+
+Die bekannteste Form der Polarisation ist die Linearpolarisation, bei der das elektrische Feld in einer einzigen festen Ebene schwingt. Diese Form der Polarisation wird oft durch \textbf{Polarisationsfilter} erzeugt. Diese funktionieren dabei durch Absorption bestimmter Feldkomponenten. Sie wirken wie ein Projektor, der das Licht in die Richtung projiziert, die mit seiner Achse übereinstimmt. Die Intensität des durchgelassenen Lichts hängt dabei vom Winkel $\theta$ zwischen der Schwingungsebene des Lichts und der Achse des Filters ab. Diese Beziehung wird durch das Malus'sche Gesetz beschrieben: 
+\begin{align} 
+    I = I_0 \cos^2 \theta, 
+\end{align} 
+wobei $I_0$ die Intensität des einfallenden Lichts darstellt.
+
+Ein weiterer Mechanismus ist die Streuung von Licht. Wenn Licht beispielsweise an Molekülen in der Atmosphäre gestreut wird, wird es teilweise polarisiert, was unter anderem die Polarisation des Himmelslichts erklärt. Schließlich können bestimmte Substanzen, wie chirale Moleküle, die Polarisationsebene von Licht drehen. Diese Eigenschaft wird als optische Aktivität bezeichnet und ist die Grundlage für die Polarimetrie.
+
+
+
+\textbf{Das Prinzip der Polarimetrie}
+
+Bestimmte Substanzen, wie chirale Moleküle, können die Polarisationsebene von Licht drehen. Diese Eigenschaft wird als optische Aktivität bezeichnet und ist die Grundlage für die Polarimetrie. Wenn linear polarisiertes Licht durch eine Lösung einer optisch aktiven Substanz geleitet wird, dreht die Substanz die Polarisationsebene um einen bestimmten Winkel $\alpha$.
+
+Die Drehung $\alpha$ ist abhängig von:
+
+der intrinsischen Eigenschaft der Substanz, beschrieben durch die spezifische Drehung $[\alpha]$,
+der Konzentration der Substanz in der Lösung ($c$),
+der Weglänge ($\lambda_{\text{lösung}}$) des Lichts durch die Lösung,
+der Wellenlänge des Lichts ($\lambda$) und
+der Temperatur ($T$).
+Diese Zusammenhänge werden durch die grundlegende Formel der Polarimetrie beschrieben:
+
+\begin{align} 
+    \alpha = [\alpha] \frac{T\lambda}{\lambda_{\text{lösung}}c}. 
+\end{align}
+
+Die spezifische Drehung $[\alpha]$ ist eine charakteristische Konstante für die Substanz, die die oben genannten Parameter berücksichtigt. Sie wird experimentell bestimmt und ist typischerweise für eine Referenztemperatur ($T_0$) und eine Referenzwellenlänge ($\lambda_0$) tabelliert.
+
+\textbf{Die Abhängigkeit von Konzentration und Weglänge}
+Die spezifische Drehung ist definiert als die gemessene Drehung der Polarisationsebene, normiert auf eine Konzentration von $1,\mathrm{g/ml}$ und eine Weglänge von $1,\mathrm{dm}$. Wenn eine Lösung nicht die Standardbedingungen erfüllt, lässt sich die tatsächlich gemessene Drehung berechnen:
+
+\begin{align} 
+    \alpha = [\alpha] \lambda_{\text{lösung}} c. 
+\end{align}
+
+Hier zeigt sich die Proportionalität der Drehung zur Konzentration $c$ und zur Weglänge $\lambda_{\text{lösung}}$. Eine höhere Konzentration oder eine längere Weglänge führen zu einer stärkeren Drehung der Polarisationsebene, da mehr Moleküle vorhanden sind, die mit dem Licht wechselwirken.
+
+\textbf{Additivität der Drehungen in Mischungen}
+In einer Mischung von zwei oder mehr optisch aktiven Substanzen wirkt jede Substanz unabhängig auf das Licht. Die Gesamtwirkung ist die Summe der Einzelbeiträge. Für zwei Substanzen mit spezifischen Drehungen $[\alpha_1]$ und $[\alpha_2]$ und Konzentrationen $c_1$ und $c_2$ ergibt sich:
+
+\begin{align} 
+    \alpha = [\alpha_1] \lambda_{\text{lösung}} c_1 + [\alpha_2] \lambda_{\text{lösung}} c_2. 
+\end{align}
+
+Diese Formel beschreibt die Drehung in Mischungen und zeigt, wie die individuellen Beiträge der Substanzen zur Gesamtdrehung addiert werden. Dieses Prinzip wird genutzt, um die Konzentrationen einzelner Komponenten in einer Mischung zu bestimmen, sofern ihre spezifischen Drehungen bekannt sind.
+
+\textbf{Die Gesamtkonzentration einer Mischung}
+In Mischungen ist die Gesamtkonzentration der Substanzen einfach die Summe der Konzentrationen der einzelnen Komponenten:
+
+\begin{align} 
+    c = c_1 + c_2. 
+\end{align}
+
+Diese Beziehung ist nützlich, um die Gesamtmenge der Substanz in einer Lösung zu berechnen, insbesondere in analytischen Anwendungen, bei denen die Konzentrationen einzelner Komponenten nicht direkt messbar sind.
+\section{Aufgabenstellung}
+\begin{enumerate}
+    \item Polarimeter bauen
+    \item Abhängigkeit des Drehwinkels von der Füllhöhe (einer Zuckerlösung) bestimmen
+    \item Abhängigkeit des Drehwinkels von der Zuckerkonzentration bestimmen.
+\end{enumerate}
+(\cite{Aufgaben})
+
+
+\section{Durchführung (Paul)}
+
+\subsection{Geräte}
+
+\begin{itemize}
+    \item Becherglas
+    \item 2 Polfilter
+    \item (Küchen-)Waage
+    \item Lampe mit Halterung/ Stativ (Aputure MC RGB LED)
+    \item Zucker
+    \item Wasser
+    \item Messschieber
+    \item Löffel
+    \item Spritze (20ml)
+    \item Ausgedruckte Winkelskala (\cite{winkelschablone})
+    \item Pappe
+    \item Klebestift
+    \item Bastelschere
+    \item Tesafilm
+    \item Zirkel
+\end{itemize}
+
+\subsection{A1: Aufbau und Justierung}\label{df:A1}
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{Versuchsaufbau(foto).jpeg}
+    \caption{Beschriftetes Foto des Versuchsaufbaus (eigene Anfertigung)}
+    \label{fig:aufbau}
+\end{figure}
+ 
+\subsection{A1: Polarimeterbau}\label{df:A1}
+Um das Polarimeter zu bauen, wird zunächst eine Winkelskala-Schablone (\cite{winkelschablone}) ausgedruckt, auf Pappe geklebt und sorgfältig ausgeschnitten. Anschließend wird ein etwa 2cm breiter Pappstreifen so zugeschnitten und zusammengeklebt, dass er die Innenwand des Becherglases als enganliegender Ring ausfüllt. Auf diesen Ring soll die Winkelskalascheibe exakt mittig aufgeklebt werden. Dafür wird der Durchmesser des Papprings gemessen, und ein Papierkreis mit demselben Durchmesser mit Zirkel aufgemalt und ausgeschnitten. Der Papierkreis wird nun aufliegend an den Pappring im Becher geklebt, sodass der Mittelpunkt des Papierkreises (und damit auch des Papprings), von Zirkel durchstochen, leicht zu finden ist.
+Wird nun der Mittelpunkt der Winkelskalascheibe ebenfalls durchstochen, lassen sich beide Mittelpunkte exakt übereinander positioniert, wobei ein Spieß durch die Löcher gesteckt wird, um die Ausrichtung zu sichern. Hier wird die Winkelscheibe an den Pappring geklebt. Man erhält einen auf das Becherglas aufsetzbaren Deckel mit einer zentriert drehbaren Winkelskala. 
+
+Oben auf die Winkelskalascheibe wird ein Polarisationsfilter nahezu zentral aufgelegt und mit einem Bleistift umrandet. Diese Fläche wird größtenteils ausgeschnitten, wobei darauf geachtet werden muss, dass an den Rändern des Lochs genügend Material übrig bleibt, um den Filter stabil festzukleben. Der Filter wird schließlich vorsichtig an dieser Stelle befestigt.
+
+Als Zeiger für die Winkelskala wird ein grober Pappring ausgeschnitten, der eng um das Becherglas passt und an einer kleinen Stelle so weit herausragt, dass er auch bei aufgesetztem Skaladeckel noch als Referenzpunkt zu sehen ist.
+
+Für den zweiten Polfilter wurde ein ähnliches System gebaut: Ein Stück Pappe, in das, auf gleiche Art, der Filter eingelassen ist, mit einem angeklebten Pappring obendrauf, in den das Becherglas enganliegend gestellt werden kann. Diese Konstruktion muss jedoch fest mit dem Becherglas verklebt werden, damit die Winkelmessung aussagekräftig ist. Daher ist es sehr viel einfacher, und zum gleichen Ergebnis führend, wenn der Filter einfach an den Boden des Becherglases geklebt wird.
+
+Im letzten Schritt wird das Becherglas mitsamt beider Polfilter (unten verklebt bzw. oben im Skaladeckel) über einem Lichtsensor platziert (Smartphone mit "Beleuchtungsstärke"-App) und eine Lampe wird mit einem Stativ von oben durch beide Polfilter geleuchtet.
+
+\subsection{A2: Drehwinkelmessung mit veränderter Füllhöhe}\label{df:A2}
+Die Lampe (eine rote LED) wird eingeschaltet. 
+Für die erste Messreihe wird untersucht, wie der Drehwinkel von der Füllhöhe einer Zuckerlösung abhängt. Dazu wird eine Referenzmessung mit Luft bzw. Leitungswasser durchgeführt, um den Zeiger auf den Skalennullpunkt einzustellen. Diese Referenzmessung geschieht auf gleiche Weise wie für die folgenden eigentlichen Messungen geschildert. 
+
+Die Winkelskala wird vorsichtig abgenommen und der Messbecher wird mit der zu untersuchenden Lösung gefüllt. Um die gewünschte 100g-Zucker-auf-1000ml-Wasser-Lösung zu untersuchen, werden, direkt im Messbecher, 30g Zucker in 300ml Wasser gelöst. Dafür kann es hilfreich sein, einen Löffel zum Umrühren und aufgewärmtes Wasser zu verwenden. Mit der Spritze kann eine beliebige Menge der Lösung entfernt werden, bevor die Füllstandshöhe h mit dem Messschieber gemessen wird. Die Tiefenmesstange des Messschiebers wird bis zum Boden des Becherglases vertikal ausgefahren und der Messschieber so geschlossen, dass er gerade so die Wasseroberfläche berührt (die Tiefenmesstange also die exakte Wassertiefe misst). Nun kann er vorsichtig herausgeholt, abgetropft und abgelesen werden. Der dabei entstehende Ablesefehler $\Delta h$ wird eingeschätzt und für die Auswertung notiert. 
+
+Die Winkelskala mit dem zweiten Polfilter wird wieder (mit Zeiger auf 0°) aufgesetzt und das Polarimeter wieder zwischen Lichtsensor und Lampe befestigt. Für jede gemessene Füllhöhe wird der obere Filter des Polarimeters jetzt so lange vorsichtig hin und her gedreht, bis der Sensor die minimale Helligkeit anzeigt. Der dabei gemessene Drehwinkel wird zusammen mit der Füllhöhe notiert. Der Ablesefehler $\Delta \alpha$ wird wieder eingeschätzt und notiert.
+
+Die Füllhöhe wird nun schrittweise mit der Spritze reduziert, und die Messungen (erst Füllhöhe, dann Drehwinkel) wurden entsprechend wiederholt.
+\subsection{A3: Drehwinkelmessung mit veränderter Zuckerkonzentration}\label{df:A3}
+
+In der zweiten Messreihe wurde die Abhängigkeit des Drehwinkels von der Zuckerkonzentration untersucht. Hierfür wurde zuerst eine Referenzmessreihe mit 300g Leitungswasser durchgeführt. Der Messbecher wurde auf der Waage mit 300g Wasser gefüllt und die Füllhöhe (wie in \ref{df:A2}) mit dem Messschieber gemessen. Die Winkelskala mit dem zweiten Polfilter wird (mit Zeiger auf 0°) aufgesetzt und das Polarimeter wieder zwischen Lichtsensor und Lampe befestigt. Nun wird für unterschiedliche Drehwinkel die Beleuchtungsstärke mit dem Lichtsensor gemessen. In 5° schritten wurde von den 0° in beide richtungen 90° ausgelenkt um mit den entstandenen 37 Messwerten eine präzise Kalibrierungskurve zu erstellen. 
+
+Die Füllhöhe wird mit dem Messchieber gemessen und mit der Spritze so angepasst, dass wieder der gleiche Wert wie bei der Referenzmessung erreicht ist.
+Für die Messungen der Zuckerlösungen reicht es aus nur ca. zwischen -30 und 30° zu messen
+
+
+
+\section{Auswertung (Paul)}
+
+
+
+
+\section{Durchführung (Alex)}
+
+\subsection{Geräte}
+
+\begin{itemize}
+    \item Volummesszylinder
+    \item 2 Polfilter
+    \item Waage
+    \item RGB LED mit Widerständen
+    \item Zucker
+    \item Wasser
+    \item Spritze/Pipette ($2 \pm 0.05$mL)
+    \item Photowiderstand ()
+    \item Analog zu Digital Converter (ADC)
+    \item Selbstgebautes Polarimeter
+\end{itemize}
+
+\subsection{A1: Polarimeterbau}\label{dfA:A1}
+
+Da ein Polarimeter schon im Jahr 2022 während eines Jugendforscht Wettbewerbs erbaut wurde, wurde entschieden dieses Instrument wiederzuverwenden, da der Großteil der Arbeit schon durchgeführt wurde und ein neues innerhalb der Woche herzustellen keine Vorteile vorliegen würde. Es musste aber immernoch alles wieder aufgebaut werden, da es schon lange nicht benutzt wurde. Der Hauptaspekt dieses Polarimeters liegt darin, dass es schwarz ist und 3D gedruckt wurde, wodurch ein stabiler Körper und verdunkelte Umgebung entsteht. Es wurde auch ein Photowiderstand hier verwendet, da man für einen solchen Sensor keinen großen Elektronischen Aufwand durchführen muss. Dieser verändert seinen Widerstand abhängig davon wie viel Licht einkommt, wobei bei voller Dunkelheit sollte der Widerstand exponentiell groß wachsen. Mit einem Spannungsteiler kann dieser Widerstand gemessen werden, wodurch die Spannung viel genauer Messbar wird. Diese Spannung kann mit einem ADC, welcher Spannungen in digitale Signale verwandelt, wodurch diese Werte einfacher digitalisiert werden können, ohne das diese manuell mit einem Multimeter notiert werden müssten. Es muss aber gesagt werden, dass ein großer Nachteil des Photowiderstandes seine Reaktionszeit ist, welche recht langsam ist. Dadurch musste manchmal eine bis mehrere minuten abgewartet werden, bis sich die Werte stabilisiert hatten.
+
+Als erstes wurde die Beleuchtung erbaut, welche aus einem RGB LED besteht, welches mit einem Widerstand mit 5V Spannung verbunden wurde. Aus den drei Farben wurde grün entschieden, da das die hellste Farbe war, und da die optische Rotation abhängig von der Wellenlänge ist, hatte diese entscheidung Folgerungen für dir vorausstehenden Messung. Diese LED wurde auf ein Steckbrett eingesteckt werden, worauf der Hauptkörper des Polarimeters plaziert wurde, welcher einen Hohlraum für diese Beleuchtung besitzt. Hierdrüber liegt das erste Polarisationsfilter und eine große Lochblende (r=0.5mm) um das Licht etwas zu kollimieren, damit das Licht halbwegs parallel weiterlief. Bei dem hauptkörper liegt als nächstes die Kammer in dem die Küvette liegt. Die Küvette ist ein langer Quader mit einem durchgehenden Loch, was auf einer Seite mit Glas verschlossen ist. Die interne gesamte Länge der Küvette besteht $l=(1.06\pm0.005)$dm. Über dieser Kammer liegt schon ein zweites Teil, nämlich ein Drehbecher mit einem Anzeiger, damit man die Auslenkung sehen kann, und enthält den zweiten Polarisationsfilter. Um die Auslenkung abzumessung liegt auf dem Hauptkörper eine Winkelskala (bei der Skala vergrüßern sich die Winkel im Uhrzeigersinn), welche ungefähr mit der Ausrichtung des ersten Polfilters übereinstimmt, mit einer Auflösung von $1°$, wobei noch $0.5°$ ablesbar sind. 
+Ganz am obersten Teil, über dem Drehbecher mit Polfilter liegt die Sensorhaltung, wo der Photowiderstand liegt. Dieser besitzt eine schon integrierte Spannungsteilung, wodurch dort drei eingehende Kabel führen, eine für die 5V, eine für die Erdung (0V) und eine für das Spannungssignal. Dieses Signal fürt wie vorher erwähnt zu dem ADC, welcher mit einem ESP32 verbunden ist, welcher die Daten an einen Laptop sendet. Man kann auch diese Sensorhaltung auch abnehmen und direkt mit dem Auge auf das Licht schauen. Somit kann man nachprüefen, dass der Sensor keine falsche Werte anzeigt.
+
+Um eine Messung aufzunehmen wird zuerst die Küvette mit der Flüssigkeit aufgefüllt, die Sensorhaltung abgenommen und der Drehbecher hochgehoben. Dann wird die Küvette in die kammer plaziert, alles zurückgesetzt und gemessen. Dafür wurde ein programm benutzt, welche den zu dem Winkel zugehörigen Wert notiert nachdem eine Taste gedrückt wurde. Das wurde wiederholt bis alle benötigten Werte notiert wurden.
+
+\subsection{A2: Drehwinkelmessung mit veränderter Füllhöhe}\label{dfA:A2}
+Es wurde für alle Experimente hier die grüne LED verwendet. Bei dieser Aufgabe musste man die Abhängigkeit der Höhe der Flüssigkeit $l$ auf die Auslenkung $\alpha$ der minimalen Beleuchtung bei einer konstanten Konzentration. Hier wurde als erstes die Lösung präpariert, wobei als erstes eine Masse von Zucker gewogen wurde und dann ein passendes Volum abgeschätzt, damit die gewünschte Massenkonzentration (100g Zucker pro 1l Wasser) vorliegt. Es wurde somit 8g Zucker zu 80mL zugemischt. Das Volummessen wurde mit einem Messzylinder durchgeführt, welcher 100mL Flüssigkeit mit einer Genauigkeit von 1mL. Nachdem diese Lösung gemischt wurde, konnte diese in die Küvette eingegossen werden. Da die Küvette verdunkelt und dadurch nicht durchsichtig ist, musste die Längenmessung durch eine Volummessung stattfinden. Da aber die Grundseite ein $1cmx1cm$ Quadrat ist, ist die Umrechnung von Volum zu Länge hier einz zu einz.
+Damit genügend Messwerte vorlagen, wurde eine Pipette verwendet, da diese eine sehr hohe genauigkeit aufwies (Auflösung von 0.05mL). Es wurde also eine Messung jede 0.5mL gemessen, wodurch insgesamt um die 21 Werte vorlagen. Es wurde zu jeder Fullhöhe die jeweilige Winkeln, einmal mit dem Auge und einmal mit dem Sensor, damit man diese Werte vergleichen könnte. 
+
+\subsection{A3: Drehwinkelmessung mit veränderter Zuckerkonzentration}\label{dfA:A3}
+
+Bei dieser letzten Messungsreihe wurde die Länge bei $l=1.06$dm konstant gehalten und die Konzentration variiert. Es wurden hier drei verschiedene Konzentrationen benötigt, aber es wurden vier gemessen, damit wenigstens noch ein Messpunkt vorliegen könnte. Es wurden wie in der vorherigen Aufgabe die Masse von Zucker zuerst bestimmt, dann ein dazu passendes Volum von Wasser gemessen. Es wurden aber zu jeder Messung nicht nur diese Werte gemessen, sondern auch noch die totale Masse und totales Volum, da man das für die Konzentrationsbestimmung brauch.
+
+Ein großer Unterschied zu der vorherigen Aufgabe lag darin, dass jetzt nicht nur der minimaler Winkel notiert werden sollte, sondern auch die helligkeitswerte zu den Winkeln, um den minimalen Winkel analytisch zu berechnen. Es wurden hierfür, als erstes der Winkel ohne einer Konzentration, also ohne Zucker, gemessen um einen Nullwert zu bestimmen. Bei dieser Messung wurden die helligkeiten jeden $1°$ gemessen, von jeweils $90°$ zu $-90°$, wobei bei den Enden dieser Winkel auch jede $5°$ gemessen wurde. Das wurde gemacht um klar darzustellen, das es sich hier um eine Sinusartige Verteilung handelt. 
+Als nächstes wurden die vier Messungen mit der selben Methode gemessen, wobei als erstes der minimaler Winkel gemessen wurde und dann die Werte $\pm30°$ um diesen Wert jede $2°$ gemessen.
+
+
+\section{Auswertung (Alexander)}
+
+\subsection{Bestimmung spezifischer Drehung mit verschiedener Füllhöhe}
+
+
+\begin{figure}[hb]
+    \centering
+    \includegraphics[width=0.9\linewidth]{POL_0.pdf}
+    \caption{Erste Messreihe}
+\end{figure}
+
+Wenn man somit $d\alpha/dl$, also die Steigung der linearen Kurve, verwendet und sie mit einer Umgestellten Gleichung \ref{eq:spezifisch}:
+
+\begin{align*}
+    \alpha &= [\alpha]_\lambda^T \cdot c\cdot l \\
+    \frac{d\alpha}{dl} &= [\alpha]_\lambda^T \cdot c \\
+    [\alpha]_\lambda^T &= \frac{\frac{d\alpha}{dl}}{c}
+\end{align*}
+
+Somit kann man den spezifischen Drehwinkel einfach ausrechnen: $[\alpha]_{Sensor} = 92.0 \pm 3.0$ und $[\alpha]_{Auge} = 87.0 \pm 2.0$.
+
+
+\subsection{Messfehler} \label{messfehler}
+
+\section{Zusammenfassung und Diskussion} \label{discussion}
+Es hätte wahrscheinlich zur Erhöhung der Messgenauigkeit beigetragen, mit Licht kürzerer Wellenlänge zu arbeiten.
+\newpage
+
+\printbibliography
+%\newpage
+%\section{Messprotokoll}
+%\foreach \n in {1,...,2}{
+%    \begin{figure}[hb]
+%        \centering
+%        \includegraphics[width=0.825\linewidth]{Messprotokoll/OPS_Paul_\n.jpeg}
+%        \caption{Messprotokoll Paul Seite \n}
+%    \end{figure}
+%}
+%\newpage
+%\foreach \n in {1,...,4}{
+%    \begin{figure}[hb]
+%        \centering
+%        \includegraphics[width=0.9\linewidth]{Messprotokoll/OPS_Alex_\n.pdf}
+%        \caption{Messprotokoll Alexander Seite \n}
+%    \end{figure}
+%}
+
+
+
+\end{document}
+

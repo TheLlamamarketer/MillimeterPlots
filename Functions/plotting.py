@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from matplotlib.collections import LineCollection
-from matplotlib.ticker import AutoMinorLocator, EngFormatter, ScalarFormatter
+from matplotlib.ticker import AutoMinorLocator, EngFormatter, ScalarFormatter, LogLocator, LogFormatter, LogFormatterMathtext
 import matplotlib.colors as mcolors
 from matplotlib import patheffects as pe
 from matplotlib.axes import Axes
@@ -443,8 +443,9 @@ def plot_data(
     bg_hex: str = "#FFFFFF",
     palette_method: str = "golden",
     min_contrast: float = 1.5,
+    log_scale: Tuple[int, int] | None = None,  # (x_base, y_base)
     xticks: Tuple[float, float] | None = None,   # (step, offset)
-    yticks: Tuple[float, float] | None = None,   # (step, offset)
+    yticks: Tuple[float, float] | None = None,   
     xlim: Tuple[float, float] | None = None,
     ylim: Tuple[float, float] | None = None,
     tight: bool = True,
@@ -490,15 +491,48 @@ def plot_data(
     with mpl.rc_context(rc):
         fig, ax = plt.subplots(figsize=(width/2.54, height/2.54), dpi=dpi, constrained_layout=True)
         _apply_bg(ax, bg_hex)
+        
+        
+        if log_scale is not None:
+            x_log, y_log = log_scale
+            if x_log is not None:
+                if x_log <= 1:
+                    raise ValueError("x_log base must be > 1 for log scale")
+                ax.set_xscale("log", base=x_log)
+                # Ensure locator/formatter are set for arbitrary bases (e.g. np.e)
+                ax.xaxis.set_major_locator(LogLocator(base=x_log))
+                # For arbitrary bases prefer a mathtext formatter (e.g. show $e^{2}$)
+                try:
+                    ax.xaxis.set_major_formatter(LogFormatterMathtext(base=x_log, labelOnlyBase=False))
+                except Exception:
+                    ax.xaxis.set_major_formatter(LogFormatter(base=x_log, labelOnlyBase=False))
+            if y_log is not None:
+                if y_log <= 1:
+                    raise ValueError("y_log base must be > 1 for log scale")
+                ax.set_yscale("log", base=y_log)
+                # Ensure locator/formatter are set for arbitrary bases (e.g. np.e)
+                ax.yaxis.set_major_locator(LogLocator(base=y_log))
+                try:
+                    ax.yaxis.set_major_formatter(LogFormatterMathtext(base=y_log, labelOnlyBase=False))
+                except Exception:
+                    ax.yaxis.set_major_formatter(LogFormatter(base=y_log, labelOnlyBase=False))
+        
+        is_x_log = ax.get_xscale() == "log"
+        is_y_log = ax.get_yscale() == "log"
 
-        if xticks is not None and yticks is not None and xlim is not None and ylim is not None:
+        if xticks is not None and yticks is not None and xlim is not None and ylim is not None and not (is_x_log or is_y_log):
             _draw_dense_grid(ax, xlim, ylim, width, height, bg_hex, xticks, yticks)
         else:
             gray = mcolors.to_rgb("#8d939d")
-            ax.grid(True, which="major", color = _ensure_contrast(gray, mcolors.to_rgb(bg_hex)))
-            ax.grid(True, which="minor", linestyle=":", linewidth=0.6, alpha=0.8, color = _ensure_contrast(gray, mcolors.to_rgb(bg_hex)))
-            ax.xaxis.set_minor_locator(AutoMinorLocator(2))
-            ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+            ax.grid(True, which="major", color=_ensure_contrast(gray, mcolors.to_rgb(bg_hex)))
+            ax.grid(True, which="minor", linestyle=":", linewidth=0.6, alpha=0.8,
+                    color=_ensure_contrast(gray, mcolors.to_rgb(bg_hex)))
+
+            if not is_x_log:
+                ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+            # for log axes, let Matplotlib’s default LogLocator/Formatter handle minors
+            if not is_y_log:
+                ax.yaxis.set_minor_locator(AutoMinorLocator(2))
 
         # Outline color defaults to high-contrast vs background
         oc_rgb = (1.0, 1.0, 1.0) if _contrast_ratio((1.0, 1.0, 1.0), mcolors.to_rgb(bg_hex)) >= _contrast_ratio((0.0, 0.0, 0.0), mcolors.to_rgb(bg_hex)) else (0.0, 0.0, 0.0)
@@ -568,7 +602,6 @@ def plot_data(
                 x, y = pts[:, 0], pts[:, 1]
                 s.markersize = s.markersize + 87 * (np.log(counts) / np.log1p(counts).max())
 
-
             xerr_lower, xerr_upper = _normalize_err(s.xerr, x)
             yerr_lower, yerr_upper = _normalize_err(s.yerr, y)
 
@@ -577,7 +610,8 @@ def plot_data(
                     x, y,
                     xerr=None if s.xerr is None else [np.abs(xerr_lower), np.abs(xerr_upper)],
                     yerr=None if s.yerr is None else [np.abs(yerr_lower), np.abs(yerr_upper)],
-                    fmt=s.marker if s.marker != "None" else "o", markeredgecolor= (oc if outline else "None") if not s.marker == "x" else None,
+                    fmt=s.marker if s.marker != "None" else "o",
+                    markeredgecolor=(oc if outline else None) if not s.marker == "x" else None,
                     color=color, ecolor=color, elinewidth=0.9, capsize=3, capthick=0.9,
                     markersize=max(4, s.markersize / 3), alpha=s.alpha, zorder=s.zorder+1,
                     label=s.label)
@@ -589,7 +623,7 @@ def plot_data(
             else:
                 if s.marker != "None":
                     sc = ax.scatter(x, y, color=color, marker=s.marker, s=s.markersize, alpha=s.alpha, zorder=s.zorder+1,
-                                    label=s.label, edgecolors=(oc if outline else "None"), linewidths=(outline_width if outline else None))
+                                    label=s.label, edgecolors=(oc if outline else None), linewidths=(outline_width if outline else None))
                 if s.line != "None":
                     line_main, = ax.plot(x, y, linestyle=s.line, color=color, linewidth=s.linewidth, zorder=s.zorder+1,
                                         label=None if s.marker != "None" else s.label)
@@ -631,13 +665,13 @@ def plot_data(
             ax.legend(loc=legend_position)
 
         # SI/Eng formatting at the end (tick locs are established)
-        if xunit is not None or yunit is not None or not (x_eng and y_eng):
+        if (xunit is not None or yunit is not None or not (x_eng and y_eng)):
             apply_si_format(
                 ax,
-                xunit=xunit,
-                yunit=yunit,
-                x_eng=x_eng,
-                y_eng=y_eng,
+                xunit=None if is_x_log else xunit,
+                yunit=None if is_y_log else yunit,
+                x_eng=False if is_x_log else x_eng,
+                y_eng=False if is_y_log else y_eng,
                 sci_limits=sci_limits,
                 put_unit_in_label=put_unit_in_label,
             )
@@ -646,7 +680,7 @@ def plot_data(
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 fig.tight_layout()
-
+                
         # Save/Export
         if filename:
             fig.savefig(filename, bbox_inches="tight", dpi=dpi, transparent=transparent)

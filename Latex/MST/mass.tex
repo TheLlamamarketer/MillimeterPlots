@@ -1,0 +1,101 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{url}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage[colorlinks=true]{hyperref}
+\usepackage{bookmark}
+\usepackage{parskip}
+\usepackage[backend=biber,style=authoryear]{biblatex}
+\addbibresource{references.bib}
+
+\title{Massenspektrometrie}
+\author{}
+\begin{document}
+\maketitle
+
+
+
+\section*{Genral Notes}
+
+\begin{itemize}[leftmargin=*]
+    \item Masse zu Ladung verhältnis wird gemessen und ein Massenspektrum erstellt
+    \item Die zu analysierende Substanz wird ionisiert
+    \item Verschiedene Ionisierungsmethoden (ESI, MALDI, EI, CI)
+    \item Diese Ionen werden in einem Massenspektrometer nach ihrem m/z getrennt
+    \item Nur die positiven Ionen werden zum Detektor geleitet, also die Kationen
+    \item Die Anzahl an zu analysierenden Molekülen wird von den Analysator begrenzt, wegen verschiedenen Ionisierungsmethoden (\url{https://userpage.fu-berlin.de/~springer/guide_eng.html})
+\end{itemize}
+
+
+\section*{Quick outline}
+\begin{itemize}[leftmargin=*]
+    \item Motivation: why MS (sensitivity, specificity, molecular weight, structural info)
+    \item Sample preparation (matrix effects, ion suppression, cleanup)
+    \item Ionization methods (ESI, MALDI, EI, CI)
+    \item Mass analyzers (TOF, Quadrupole, Orbitrap, FT-ICR)
+    \item Tandem MS and fragmentation (MS/MS strategies)
+    \item Data interpretation and reporting (m/z, isotopic patterns, mass accuracy)
+    \item Common pitfalls and troubleshooting
+    \item Take-home messages
+\end{itemize}
+
+\section*{Key concepts (short)}
+\begin{itemize}[leftmargin=*]
+    \item m/z: mass-to-charge ratio; observed peaks indexed by charge state.
+    \item Mass accuracy: difference between measured and theoretical mass (ppm).
+    \item Resolving power: \(R=\dfrac{m}{\Delta m}\) (often defined at FWHM).
+    \item Isotopic distributions reveal elemental composition clues.
+    \item Tandem MS provides structural information via controlled fragmentation.
+    \item Calibration and internal standards improve quantitation and accuracy.
+\end{itemize}
+
+\section*{Ionization methods (one-line reminders)}
+\begin{itemize}[leftmargin=*]
+    \item ESI: soft ionization, good for polar/large biomolecules, generates multiply charged ions.
+    \item MALDI: pulsed laser, solid matrix, often singly charged, good for peptides/proteins.
+    \item EI/CI: gas-phase small molecules, good library matching (GC-MS).
+\end{itemize}
+
+\section*{Mass analyzers (strengths / when to mention)}
+\begin{itemize}[leftmargin=*]
+    \item TOF: high mass range, fast acquisition.
+    \item Quadrupole: robust, good for targeted quantitation (SRM/MRM).
+    \item Orbitrap / FT-ICR: very high resolving power and accuracy.
+    \item Ion traps: MSn capability but limited mass range/resolution.
+\end{itemize}
+
+\section*{Tandem MS notes}
+\begin{itemize}[leftmargin=*]
+    \item Collision-induced dissociation (CID) basics: b/y ions for peptides.
+    \item Use MS/MS to confirm identity and reduce false positives.
+    \item Design experiments: targeted (SRM) vs discovery (DDA/DIA).
+\end{itemize}
+
+\section*{Common pitfalls / troubleshooting}
+\begin{itemize}[leftmargin=*]
+    \item Contamination: plasticizers, salts, detergents -- degrade spectra.
+    \item Ion suppression: co-eluting species reduce sensitivity.
+    \item Incorrect charge assignment: check isotopic spacing.
+    \item Over-interpretation of low S/N peaks.
+\end{itemize}
+
+\section*{Presentation tips (for slides)}
+\begin{itemize}[leftmargin=*]
+    \item Show one clear spectrum and annotate peaks (m/z, charge, assignment).
+    \item Use schematic diagrams for ionization and analyzer operation.
+    \item Keep equations minimal: show m/z and resolving power only.
+    \item Include a short example workflow (sample → prep → run → analyze).
+\end{itemize}
+
+\section*{Take-home messages}
+\begin{itemize}[leftmargin=*]
+    \item MS answers both identity and quantity questions when used correctly.
+    \item Instrument choice depends on the question: high resolution vs robustness.
+    \item Good sample prep and controls often matter more than marginal instrument upgrades.
+\end{itemize}
+
+
+\end{document}
