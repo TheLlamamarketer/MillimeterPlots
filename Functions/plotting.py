@@ -554,7 +554,6 @@ def plot_data(
                 for k, (lo, hi) in enumerate(s.confidence):
                     if lo is None or hi is None:
                         continue
-                    print(s.fit_x)
                     xci = np.asarray(s.fit_x if s.fit_x is not None else x, dtype=float)
                     lo = np.asarray(lo, dtype=float)
                     hi = np.asarray(hi, dtype=float)

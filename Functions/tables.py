@@ -3,6 +3,7 @@ from dataclasses import is_dataclass
 from typing import Any, Dict, List, Sequence, Tuple
 import numpy as np
 import math
+from Functions.help import round_val  
 
 # ----------------- small helpers -----------------
 def _is_seq(x) -> bool:
@@ -96,8 +97,6 @@ def _fmt_pair_with_shared_exp(v: float, e: float, p: int | None, *, hi: float = 
     se = f"{me:.{dec}f}" if dec > 0 else f"{me:.0f}"
     return f"({sv} \\pm {se})e{k}"
 
-# your rounder (import exactly like your old code)
-from Functions.help import round_val  # err==0 -> (rounded_val, power); err!=0 -> (rounded_val, err_round, power)
 
 # ----------------- core: STANDARD -----------------
 def print_standard_table(

@@ -1,4 +1,10 @@
+import sys
 import numpy as np
+from pathlib import Path
+repo_root = Path(__file__).resolve().parents[2]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
 from Functions.tables import datasets_to_table_blocks, print_standard_table, print_complex_table
 
 data = {
