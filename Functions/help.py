@@ -102,7 +102,7 @@ def slope(xdata, ydata, yerr=None):
 
     return a, da, b, db, R2, variance
 
-def lmfit(xdata, ydata, yerr=None, model="linear", constraints=None, const_weight=1):
+def lmfit(xdata, ydata, yerr=None, model="linear", constraints=None, const_weight=0):
     """
     Fit data to a specified model: linear, quadratic, or exponential.
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
