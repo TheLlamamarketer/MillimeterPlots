@@ -3,8 +3,7 @@ from pathlib import Path
 import re
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.signal import find_peaks, peak_widths
+from scipy.signal import find_peaks
 
 repo_root = Path(__file__).resolve().parents[2]
 if str(repo_root) not in sys.path:
@@ -88,56 +87,65 @@ for k, v in data_by_name.items():
     sigma  = 1.4826*mad
     rng    = np.ptp(seg)                             # estimate of amplitude range
     
-    pks_loose, _ = find_peaks(seg, prominence=2*sigma)
-    period = np.median(np.diff(pks_loose))
+    #pks_loose, _ = find_peaks(-seg, prominence=2*sigma)
+    #period = np.median(np.diff(pks_loose))
 
-    prom0  = max(2.5*sigma, 0.05*rng)
-    min_distance = int(0.5 * period)
-
-    prom = prom0
-    for _ in range(3):
-        pks_max, prop_max = find_peaks(seg,  prominence=prom, distance=min_distance)
-        pks_min, prop_min = find_peaks(-seg, prominence=prom, distance=min_distance)
-        if len(pks_max) >= 30 and len(pks_min) >= 30:
-            break
-        prom *= 0.7  # relax by 30% and try again
+    prom = max(2.5*sigma, 0.05*rng)
+    for _ in range(4):
+        pks_max, prop_max = find_peaks(seg,  prominence=prom)
+        pks_min, prop_min = find_peaks(-seg, prominence=prom)
+        if len(pks_max) >= 30 and len(pks_min) >= 30: break
+        prom *= 0.7
 
     pk_vals = seg[pks_max]
     tr_vals = seg[pks_min]
     
-    cut_hi = np.quantile(pk_vals, 0.90) if len(pk_vals) > 0 else np.nan
-    cut_lo = np.quantile(tr_vals, 0.10) if len(tr_vals) > 0 else np.nan
+    cut_hi = np.quantile(pk_vals, 0.70) if len(pk_vals) > 0 else np.nan
+    cut_lo = np.quantile(tr_vals, 0.30) if len(tr_vals) > 0 else np.nan
+
+    # keep originals to align properties and for fallbacks
+    orig_pks_max = pks_max
+    orig_pks_min = pks_min
     
-    peaks_max = pks_max[pk_vals >= cut_hi]
-    peaks_min = pks_min[tr_vals <= cut_lo]
+    prom_all_max = np.asarray(prop_max.get('prominences', np.ones_like(orig_pks_max, dtype=float)))
+    prom_all_min = np.asarray(prop_min.get('prominences', np.ones_like(orig_pks_min, dtype=float)))
 
-    prom_max = np.asarray(prop_max.get('prominences', np.ones_like(pks_max)))
-    prom_min = np.asarray(prop_min.get('prominences', np.ones_like(pks_min)))
+    # build masks for strongest maxima (top 10%) and deepest minima (bottom 10%)
+    mask_max = np.isfinite(cut_hi) & (pk_vals >= cut_hi)
+    mask_min = np.isfinite(cut_lo) & (tr_vals <= cut_lo)
 
+    # apply masks consistently to indices and prominences
+    pks_max = orig_pks_max[mask_max]
+    pks_min = orig_pks_min[mask_min]
+    prom_max = prom_all_max[mask_max]
+    prom_min = prom_all_min[mask_min]
+    
     wgt_max = prom_max / (sigma**2 + 1e-12)
     wgt_min = prom_min / (sigma**2 + 1e-12)
     
-    Umax = np.average(seg[pks_max], weights=wgt_max)
-    Umin = np.average(seg[pks_min], weights=wgt_min)
     
-    U_max = np.append(U_max, Umax)
-    U_min = np.append(U_min, Umin)
+    # robust averaging with safe fallbacks
+    if pks_max.size > 0 and np.sum(wgt_max) > 0:
+        Umax = np.average(seg[pks_max], weights=wgt_max)
+    elif orig_pks_max.size > 0:
+        Umax = float(np.mean(seg[orig_pks_max]))
+    else:
+        Umax = np.nan
+
+    if pks_min.size > 0 and np.sum(wgt_min) > 0:
+        Umin = np.average(seg[pks_min], weights=wgt_min)
+    elif orig_pks_min.size > 0:
+        Umin = float(np.mean(seg[orig_pks_min]))
+    else:
+        Umin = np.nan
+    dUmax = (1.4826*np.median(np.abs(seg[pks_max]-np.median(seg[pks_max])))) / np.sqrt(max(1, pks_max.size)  ) if pks_max.size else np.nan 
+    dUmin = (1.4826*np.median(np.abs(seg[pks_min]-np.median(seg[pks_min])))) / np.sqrt(max(1, pks_min.size)  ) if pks_min.size else np.nan
 
     K = (Umax - Umin) / (Umax + Umin)
     K_all = np.append(K_all, K)
     
-    def weighted_error(values, weights):
-        wsum = np.sum(weights)
-        if wsum == 0:
-            return np.nan
-        mean = np.average(values, weights=weights)
-        # weighted variance (with Bessel correction via effective N)
-        var = np.sum(weights * (values - mean)**2) / (wsum - np.sum(weights**2)/wsum)
-        se  = np.sqrt(var / len(values))
-        return se
-
-    dUmax = weighted_error(seg[pks_max], wgt_max)
-    dUmin = weighted_error(seg[pks_min], wgt_min)
+    U_max = np.append(U_max, Umax)
+    U_min = np.append(U_min, Umin)
     
     dU_max = np.append(dU_max, dUmax)
     dU_min = np.append(dU_min, dUmin)
@@ -152,6 +160,7 @@ for k, v in data_by_name.items():
     
     
     """
+    # Simplified peak selection and averaging for comparison:
     max_avg = np.mean(v[cutoff_indexes[k]][find_peaks(v[cutoff_indexes[k]], prominence=0.9)[0]])
     min_avg = np.mean(v[cutoff_indexes[k]][find_peaks(-v[cutoff_indexes[k]], prominence=0.9)[0]])
     
@@ -174,6 +183,13 @@ for k, v in data_by_name.items():
     y_min = v[cutoff_indexes[k]][peaks_min]
     
     """
+    
+    # plot a histogram of all values in the segment
+    plt.hist(seg, bins=500, alpha=0.7, color='blue')
+    plt.xlabel("Intensity in U/V")
+    plt.ylabel("Frequency")
+    plt.title(f"Histogram of segment values d={k}")
+    plt.show()
 
     smax = DatasetSpec(x=t_max, y=y_max, fit_x= np.linspace(tseg.min(), tseg.max(), 5), fit_y=[Umax]*5, label= f"Peaks d={k}", marker='x', line='None', color='red', fit_line='--', fit_label=f"Avg. Peak: {Umax:.2f}")
     smin = DatasetSpec(x=t_min, y=y_min, fit_x= np.linspace(tseg.min(), tseg.max(), 5), fit_y=[Umin]*5, label= f"Minima d={k}", marker='x', line='None', color='blue', fit_line='--', fit_label=f"Avg. Min: {Umin:.2f}")
@@ -213,7 +229,7 @@ s_K = DatasetSpec(
     confidence=calc_CI(results_K, x_fits, sigmas=[1]),
     xerr=0.2,
     yerr=(yerr_lower, yerr_upper),   # correct asymmetric log errors
-    label="K(d)",
+    label="K(d) Python",
     marker='.', line='None'
 )
 
@@ -241,7 +257,7 @@ print_standard_table(data=data_new,
     label="tab:hol_neue_daten",
     column_formats=["S[table-format=1.2]", "S[table-format=1.2]", "S[table-format=1.2]", "S[table-format=1.2]"],
     si_setup=None,
-    show=False,
+    show=True,
 )
 
 
@@ -336,18 +352,19 @@ s_K_old = DatasetSpec(
     confidence=calc_CI(results_K_old, x_fits, sigmas=[1]),
     xerr=0.2,
     yerr=(yerr_lower_old, yerr_upper_old),   # correct asymmetric log errors
-    label="K(d) Programm",
+    label="K(d) Lab View",
     marker='.', line='None', color_group='old'
 )
 
-s_K_normal = DatasetSpec( x=np.array(dz), y=K_all, yerr=dK_all, xerr = 0.2, label="K(d)", marker='.', line='None' )
-s_K_old_normal = DatasetSpec( x=np.array(dz), y=K_old, yerr=dK_old, xerr = 0.2, label="K(d) Programm", marker='.', line='None' )
+s_K_normal = DatasetSpec( x=np.array(dz), y=K_all, yerr=dK_all, xerr = 0.2, fit_x = x_fits, fit_y=np.exp(results_K.eval(x=x_fits)), label="K(d) Python", marker='.', line='None' )
+s_K_old_normal = DatasetSpec( x=np.array(dz), y=K_old, yerr=dK_old, xerr = 0.2, fit_x = x_fits, fit_y=np.exp(results_K_old.eval(x=x_fits)), label="K(d) Lab View", marker='.', line='None', color_group='old' )
 
 plot_data(
     filename=f"Plots/Hol_K_normal.pdf",
     datasets=[s_K_normal, s_K_old_normal],
     xlabel="d/cm ",
     ylabel="K",
+    height=10,
     title="Michelson Interferometer Kontrast K(d)",
     color_seed=72,
     plot=False
@@ -362,31 +379,8 @@ plot_data(
     ylabel="$ln(K)$",
     title="Michelson Interferometer - ln(Kontrast)",
     color_seed=72,
-    plot=True
+    plot=False
 )
-
-
-print_standard_table(
-    data={
-        'a': [results_K.params['a'].value, results_K_old.params['a'].value],
-        'b': [results_K.params['b'].value, results_K_old.params['b'].value],
-        'R2': [results_K.rsquared, results_K_old.rsquared],
-        'Parameters': ['{Python}', '{Programm}']
-    },
-    headers={
-        "Parameters": {"label": "{}"},
-        "a":          {"label": "{$a$}", "intermed": True, "err": results_K.params['a'].stderr},
-        "b":   {"label": "{$b$}", "intermed": True, "err": results_K.params['b'].stderr},
-        "R2":   {"label": "{$R^2$}", "intermed": True}
-    },
-    caption="Fit-Parameter für die Auswertung des Michelson-Interferometers.",
-    label="tab:fit_parameter",
-    column_formats=["S[table-format=1.2]", "S[table-format=1.2]", "S[table-format=1.2]", "S[table-format=1.2]"],
-    si_setup=None,
-    show=True,
-)
-
-
 
 
 d_coh_new = (-1 - results_K.params['a'].value) / results_K.params['b'].value
@@ -403,6 +397,26 @@ dd_coh_old = np.sqrt(
 )
 
 
-print(f"Coherence length new data: d_coh = {d_coh_new:.1f} ± {dd_coh_new:.1f} cm")
-print(f"Coherence length old data: d_coh = {d_coh_old:.1f} ± {dd_coh_old:.1f} cm")
+
+print_standard_table(
+    data={
+        'a': [results_K.params['a'].value, results_K_old.params['a'].value],
+        'b': [results_K.params['b'].value, results_K_old.params['b'].value],
+        'R2': [results_K.rsquared, results_K_old.rsquared],
+        'Parameters': ['{Python}', '{Lab View}'],
+        'l': [d_coh_new, d_coh_old]
+    },
+    headers={
+        "Parameters": {"label": "{}"},
+        "a":          {"label": "{$a$}", "intermed": True, "err": results_K.params['a'].stderr},
+        "b":   {"label": "{$b$}", "intermed": True, "err": results_K.params['b'].stderr},
+        "R2":   {"label": "{$R^2$}", "intermed": True},
+        "l":   {"label": "{$l_{coh}$/cm}", "intermed": True, "err": [dd_coh_new, dd_coh_old]}
+    },
+    caption="Fit-Parameter für die Auswertung des Michelson-Interferometers.",
+    label="tab:fit_parameter",
+    column_formats=["S[table-format=1.2]|"*5],
+    si_setup=None,
+    show=True,
+)
 

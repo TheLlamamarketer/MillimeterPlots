@@ -102,7 +102,7 @@ def slope(xdata, ydata, yerr=None):
 
     return a, da, b, db, R2, variance
 
-def lmfit(xdata, ydata, yerr=None, model="linear", constraints=None, const_weight=0):
+def lmfit(xdata, ydata, yerr=None, model="linear", constraints=None, const_weight=0, initial_params=None):
     """
     Fit data to a specified model: linear, quadratic, or exponential.
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
@@ -133,6 +133,9 @@ def lmfit(xdata, ydata, yerr=None, model="linear", constraints=None, const_weigh
         raise ValueError(f"Unrecognized model: {model}")
 
     model_func, init_params = models[model]
+    if initial_params:
+        init_params.update(initial_params)
+        
     mode_func = Model(model_func)
     params = mode_func.make_params(**init_params)
 
