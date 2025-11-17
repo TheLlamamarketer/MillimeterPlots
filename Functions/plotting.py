@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import types
 import warnings
 """
@@ -68,6 +69,16 @@ class DatasetSpec:
     fit_line: str = "-"
     fit_label: bool = True
     fit_error_lines: List[Tuple[Sequence[float] | None, Sequence[float] | None]] | None = None
+    fit_color: str | None = None
+    fit_color_group: str | None = None
+    
+    # Axlines 
+    axlines: List[Tuple[float, str]] | None = None  # list of (position, line_style) to draw vertical/horizontal lines, eg. [(2.5, "h"), (3.4, "v")]
+    axlines_label: List[str] | None = None
+    axlines_line: str = "--"
+    axlines_intervals: List[Tuple[float, float]] | None = None
+    axlines_color: str | None = None
+    axlines_color_group: str | None = None
 
     # confidence intervals: list of (lower, upper) arrays matching x (or fit_x)
     confidence: List[Tuple[Sequence[float] | None, Sequence[float] | None]] | None = None
@@ -300,8 +311,16 @@ def normalize_dataset(
             fit_y=d.get("fit"),
             fit_x=d.get("fit_xdata"),
             fit_line=d.get("fit_line", "-"),
+            fit_color=d.get("fit_color"),
+            fit_color_group=d.get("fit_color_group"),
             fit_label=d.get("fit_label", True),
             fit_error_lines=d.get("fit_error_lines"),
+            axlines=d.get("axlines"),
+            axlines_label=d.get("axlines_label"),
+            axlines_line=d.get("axlines_line", "--"),
+            axlines_color=d.get("axlines_color"),
+            axlines_color_group=d.get("axlines_color_group"),
+            axlines_intervals=d.get("axlines_intervals"),
             confidence=d.get("confidence"),
             confidence_label=d.get("confidence_label", True),
             aggregate_duplicates=d.get("aggregate_duplicates", False),
@@ -427,6 +446,7 @@ def apply_si_format(
 # -----------------------------------------------------------------------------
 # Main plotting
 # -----------------------------------------------------------------------------
+
 def plot_data(
     datasets: Sequence[DatasetSpec | Mapping[str, Any] | Tuple[Any, Any] | Tuple[Any, Any, str]],
     *,
@@ -465,9 +485,83 @@ def plot_data(
     put_unit_in_label: bool = True,
     plot: bool | str = False
 ) -> Tuple[Figure, Axes]:
-    """Plot multiple datasets with clean defaults. Save to filename if given.
+    """Comprehensive 2D plotting function with multiple customization options.
+    
+    Parameters
+    ----------
+    datasets : Sequence of DatasetSpec, dict, or (x,y) tuples
+        List of datasets to plot.
+    filename : str, optional
+        Output filename (PDF/PNG/SVG based on extension).
+    color_seed : int, optional
+        Seed for color generation.
+    title : str, optional
+        Plot title.
+    subtitle : str, optional
+        Plot subtitle.
+    xlabel : str, optional
+        X-axis label.
+    ylabel : str, optional
+        Y-axis label.
+    legend_position : str or None, optional
+        Matplotlib legend position string or None for no legend.
+    width : float, optional
+        Figure width in cm.
+    height : float, optional
+        Figure height in cm.
+    dpi : int, optional
+        Figure DPI.
+    bg_hex : str, optional
+        Background color hex.
+    palette_method : str, optional
+        "golden", "linspace", or "okabe" for color generation.
+    min_contrast : float, optional
+        Minimum contrast ratio between colors and background.
+    log_scale : tuple of int or None, optional
+        (x_base, y_base) for log scaling, or None.
+    xticks : tuple of float or None, optional
+        (step, offset) for dense grid lines, or None.
+    yticks : tuple of float or None, optional
+        (step, offset) for dense grid lines, or None.
+    xlim : tuple of float or None, optional
+        X-axis limits.
+    ylim : tuple of float or None, optional
+        Y-axis limits.
+    tight : bool, optional
+        Use tight layout.
+    transparent : bool, optional
+        Save figure with transparent background.
+    export_svg : bool, optional
+        Also export to SVG alongside filename.
+    export_png : bool, optional
+        Also export to PNG alongside filename.
+    outline : bool, optional
+        Whether to draw outlines for visibility.
+    outline_width : float, optional
+        Width of outlines.
+    outline_color : str or None, optional
+        Color of outlines.
+    xunit : str or None, optional
+        Unit for x axis.
+    yunit : str or None, optional
+        Unit for y axis.
+    x_eng : bool, optional
+        Whether to use engineering notation for x axis.
+    y_eng : bool, optional
+        Whether to use engineering notation for y axis.
+    sci_limits : tuple of int, optional
+        Scientific notation limits.
+    put_unit_in_label : bool, optional
+        Whether to include units in axis labels.
+    plot : bool or str, optional
+        Whether to display the plot or return the figure and axes using (plot=True/False or "figure")
 
-    Returns (fig, ax).
+    Returns
+    -----------
+    fig : .Figure
+    ax : `~matplotlib.axes.Axes`
+
+    
     """
     # Normalize datasets and filter out empties early
     if not isinstance(datasets, (list, tuple)):
@@ -560,6 +654,93 @@ def plot_data(
                     alpha = max(0.1, 0.5 - 0.08 * k)
                     ax.fill_between(xci, lo, hi, facecolor=color, edgecolor=None, 
                                     alpha=alpha, zorder=2, label=s.label + f" {k+1}σ Confidence Interval" if s.confidence_label and s.label else None)
+                    
+            # Axlines
+            if s.axlines is not None:
+                # Normalize colors, labels and intervals so behavior is predictable
+                n_lines = len(s.axlines)
+
+                # colors: single string -> use for all; iterable -> per-line, fallback to series color
+                if s.axlines_color is None:
+                    al_colors = [color] * n_lines
+                elif isinstance(s.axlines_color, str):
+                    al_colors = [s.axlines_color] * n_lines
+                else:
+                    al_colors = list(s.axlines_color)
+                    if len(al_colors) < n_lines:
+                        al_colors += [color] * (n_lines - len(al_colors))
+
+                # labels: single string -> show once (first line only), iterable -> per-line
+                if s.axlines_label is None:
+                    al_labels = [None] * n_lines
+                elif isinstance(s.axlines_label, str):
+                    al_labels = [s.axlines_label] + [None] * (n_lines - 1)
+                else:
+                    al_labels = list(s.axlines_label)
+                    if len(al_labels) < n_lines:
+                        al_labels += [None] * (n_lines - len(al_labels))
+
+                # intervals (optional ranges): align length, default None
+                if s.axlines_intervals is None:
+                    al_intervals = [None] * n_lines
+                elif isinstance(s.axlines_intervals, (list, tuple)):
+                    if len(s.axlines_intervals) == 2:
+                        al_intervals = [s.axlines_intervals] * n_lines
+                    elif len(s.axlines_intervals) < n_lines:
+                        al_intervals += [None] * (n_lines - len(al_intervals))
+                    else:
+                        al_intervals = list(s.axlines_intervals)
+
+                for i in range(n_lines):
+                    pos = s.axlines[i]
+                    lbl = al_labels[i]
+                    inter = al_intervals[i]
+                    al_color = al_colors[i]
+
+                    if pos is None:
+                        continue
+
+                    # pos can be (value, orientation) or simple scalar
+                    if isinstance(pos, (tuple, list)) and len(pos) == 2:
+                        val, orientation = pos
+                    else:
+                        val, orientation = pos, "h"
+
+                    # normalize orientation
+                    o = str(orientation).lower()
+
+                    # determine plotting bounds if intervals are not provided
+                    if inter is not None and isinstance(inter, (list, tuple)) and len(inter) == 2:
+                        low, high = inter
+                    else:
+                        low, high = None, None
+
+                    try:
+                        if o.startswith("h") or o.startswith("-"):
+                            xmin = low if low is not None else (xlim[0] if xlim is not None else None)
+                            xmax = high if high is not None else (xlim[1] if xlim is not None else None)
+                            al = ax.hlines(y=float(val), xmin=xmin, xmax=xmax, linestyle=s.axlines_line, color=al_color, linewidth=1.0, zorder=s.zorder,
+                                            label=lbl)
+                        elif o.startswith("v") or o.startswith("|") or o.startswith("x"):
+                            ymin = low if low is not None else (ylim[0] if ylim is not None else None)
+                            ymax = high if high is not None else (ylim[1] if ylim is not None else None)
+                            al = ax.vlines(x=float(val), ymin=ymin, ymax=ymax, linestyle=s.axlines_line, color=al_color, linewidth=1.0, zorder=s.zorder,
+                                            label=lbl)
+                        else:
+                            # unknown orientation, skip
+                            continue
+                    except Exception:
+                        # if something goes wrong (e.g., cannot convert val), skip this line
+                        continue
+
+                    if outline:
+                        # different artists have different attribute access; handle gracefully
+                        try:
+                            al.set_path_effects([
+                                pe.Stroke(linewidth=getattr(al, 'get_linewidth', lambda: 1.0)() + outline_width, foreground=oc), pe.Normal()
+                            ])
+                        except Exception:
+                            pass
 
             # Fit lines
             if s.fit_y is not None or isinstance(s.fit_y, types.LambdaType):

@@ -1,7 +1,5 @@
-from re import A
 import sys
 from pathlib import Path
-from turtle import width
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, peak_widths
@@ -14,123 +12,219 @@ from Functions.plotting import DatasetSpec, plot_data
 from Functions.tables import *
 from Functions.help import *
 
-
-
 source_dir = Path('FP/Ruby/Data')
 
-# file has structure: (t, Amplitude)
+# Calibration parameters determined from Hg lines
+Step_corrected = 0.59796398
+Start_offset = 350 - 346.666132
+
+Hg_lines = np.array([365.0153, 404.6563, 435.8328, 253.6517*2, 546.0735, 576.9598, 579.0663, 296.7280*2, 312.5668*2, 313.16935000*2])
+
 
 data: dict[str, np.ndarray] = {}
+
+
 for file in sorted(source_dir.iterdir()):
-    if not file.is_file():
+    if not file.is_file() or file.stem.lower() == '9_diff_b2':
         continue
     
     # Read first 3 lines separately
     with open(file, 'r') as f:
-        first_3_lines = [f.readline().strip() for _ in range(3)]
+        start, step, direction = [float(f.readline().strip()) for _ in range(3)]
+
+    if step == 0.6:
+        step = Step_corrected
+    start -= Start_offset
     
-    d = pd.read_csv(
+    raw = pd.read_csv(
         file, header=None, decimal=".", sep=r"\s+", engine="python", skiprows=3).to_numpy(dtype=float)
+
+    t = raw[:, 0]
+    A = raw[:, 1]
     
     key = file.stem[2:] if not file.stem.startswith('Hg') else file.stem
+    
     data[key] = {
-        't': np.array(d[:, 0]), 
-        'A': np.array(d[:, 1]),
-        'header': first_3_lines
+        't': t, 
+        'A': A,
+        'header': [start, step, direction],
+        'lambda': start + direction * step * t
     }
-data[key]['A'] = -1 * (data[key]['A'] + np.min(-data[key]['A']))
 
-peaks_hg, props_hg = find_peaks(data[key]['A'], prominence=0.03, height=0.012)
+# --------------------------------------------------------------------------------
+# --- Analyze Hg lines for calibration -------------------------------------------
+# --------------------------------------------------------------------------------
 
-widths_hg = peak_widths(data[key]['A'], peaks_hg, rel_height=0.2)
+data['Hg_lines']['A'] = -1 * (data['Hg_lines']['A'] + np.min(-data['Hg_lines']['A'])) # invert and shift to zero baseline as we have emission lines
 
-s_hg = DatasetSpec(data[key]['t'], data[key]['A'], label=key, marker='None', line='-')
-s_peaks = DatasetSpec(data[key]['t'][peaks_hg], data[key]['A'][peaks_hg], label='Peaks', marker='x', line='None')
+A_Hg = data['Hg_lines']['A']
+A_Hg = A_Hg / np.max(A_Hg)  # normalize to max
+data['Hg_lines']['A'] = A_Hg
+
+lam_Hg = data['Hg_lines']['lambda']
 
 
+# find peaks
+peaks_hg, props_hg = find_peaks(A_Hg,  height=0.012)
+widths_hg = peak_widths(A_Hg, peaks_hg, rel_height=0.21)
 
-line_widths = np.array([])
-line_widths_heights = np.array([])
+
 results_Hg_y = np.array([])
 t_gauss = np.array([])
 
+line_peaks: list[tuple[float, float]] = [] 
 
-for i in range(len(peaks_hg)):
-    
-    prominences = props_hg['prominences'][i]
-    widths = widths_hg[0][i] *0.1
+for i, peak_i in enumerate(peaks_hg):
+    widths = widths_hg[0][i] * 0.1
     width_heights = widths_hg[1][i]
-    left_ips = widths_hg[2][i]
-    right_ips = widths_hg[3][i]
+    left_ips = int(widths_hg[2][i])
+    right_ips = int(widths_hg[3][i])
     
-    line_widths = np.append(line_widths, data[key]['t'][int(left_ips):int(right_ips)+1], axis=0)
-    line_widths_heights = np.append(line_widths_heights, width_heights * np.ones(int(right_ips) - int(left_ips) + 1), axis=0)
+    #expand = int(widths / 2)
+    expand = 0
+    fit_left = max(0, left_ips - expand)
+    fit_right = min(len(lam_Hg) - 1, right_ips + expand)
+
+    mask = (lam_Hg >= lam_Hg[fit_left]) & (lam_Hg <= lam_Hg[fit_right])
     
-    
-    mask = (data[key]['t'] >= data[key]['t'][int(left_ips) - int(1*widths/2)]) & (data[key]['t'] <= data[key]['t'][int(right_ips) + int(1*widths/2)])
-    t_per_peak = data[key]['t'][mask]
-    A_per_peak = data[key]['A'][mask]
-    
-    # Add NaNs to line_widths_heights to separate peaks
-    line_widths_heights = np.append(line_widths_heights, [np.nan], axis=0)
-    line_widths = np.append(line_widths, [line_widths[-1]+0.1], axis=0)
-    
-    times_gauss = np.linspace(t_per_peak[0], t_per_peak[-1], 100)
+    lam_per_peak = lam_Hg[mask]
+    A_per_peak = A_Hg[mask]
     
     result_Hg = lmfit(
-        xdata= t_per_peak,
+        xdata= lam_per_peak,
         ydata= A_per_peak,
         model="gaussian",
-        initial_params={'c': widths/2.355, 'b': data[key]['t'][peaks_hg[i]]} # a * np.exp(-((x - b) / c)**2 / 2) + d
+        initial_params={'c': widths/2.355, 'b': lam_Hg[peak_i]} # a * np.exp(-((x - b) / c)**2 / 2) + d
     )
     
-    results_Hg_y = np.append(results_Hg_y, result_Hg.eval(x=times_gauss), axis=0)
-    t_gauss = np.append(t_gauss, times_gauss, axis=0)
+    #lam_gauss = np.linspace(lam_per_peak[0], lam_per_peak[-1], 100)
+    #results_Hg_y = np.append(results_Hg_y, result_Hg.eval(x=lam_gauss), axis=0)   
     
+    results_Hg_y = np.append(results_Hg_y, [result_Hg], axis=0)
+    b_val = result_Hg.params['b'].value
     
-    centering = (result_Hg.params['b'].value)[5]
-    centering_wavelength = 507.3034
-    print(f"Fitted peak at {data[key]['t'][peaks_hg[i]]:.4g} s:, Wavelength={(centering_wavelength-350)/centering*data[key]['t'][peaks_hg[i]] + 350}, Peak={100/4.172*result_Hg.eval(x=result_Hg.params['b'].value):.4g}, Center={result_Hg.params['b'].value:.4g}s, Prominence={prominences:.4g}")
+    line_peaks.append((b_val, props_hg['peak_heights'][i])) # or result_Hg.eval(x=b_val) for amplitude
 
-    
-s_widths = DatasetSpec(
-    line_widths,
-    line_widths_heights,
-    label=f'Width', marker='None', line='--'
+
+hg_start, hg_step, hg_direction = data["Hg_lines"]["header"]
+lambda_peaks = np.array([peak[0] for peak in line_peaks])
+t_hg_peaks = (lambda_peaks - hg_start) / (hg_direction * hg_step)
+t_hg_peaks = data["Hg_lines"]["t"][peaks_hg]
+
+
+data_hg = {
+    'linelist': Hg_lines,
+    'fitted': lambda_peaks,
+    'dfitted': [result_Hg.params['b'].stderr for result_Hg in results_Hg_y],
+    'diff': lambda_peaks - Hg_lines,
+}
+
+
+headers_hg = {
+    'linelist':     {'label': '{$Hg_{lines}/nm$}', 'intermed': True },
+    'fitted':       {'label': '{$Hg_{fitted}/nm$}', 'intermed': True, 'err': data_hg['dfitted']},
+    'diff':         {'label': '{$\Delta Hg/nm$}', 'intermed': True},
+}
+
+print_standard_table(
+    data_hg,
+    headers_hg,
+    caption="Fitted Hg line positions and their differences to the known literature values.",
+    label="tab:ruby_hg_lines",
+    show=True
 )
 
+results_line_hg = lmfit(xdata=t_hg_peaks, ydata=Hg_lines, model="linear")
+
+print_line = True
+
+
+if print_line:
+    print(results_line_hg.fit_report())
+    print(f"a = {results_line_hg.params['a'].value:.3f} ± {results_line_hg.params['a'].stderr:.3f}, b = {results_line_hg.params['b'].value:.3f} ± {results_line_hg.params['b'].stderr:.3f}")
+
+
+# --------------------------------------------------------------------------------
+# --- Plotting the Hg Lines ------------------------------------------------------
+# --------------------------------------------------------------------------------
+
+s_hg = DatasetSpec(
+    x=lam_Hg,
+    y=A_Hg,
+    label="Hg_lines",
+    marker="None",
+    line="-",
+    axlines=[(line, "|") for line in Hg_lines],
+    axlines_color="green",
+    axlines_label="Known Hg lines",
+    axlines_intervals=[(-0.05, peak) for peak in A_Hg[peaks_hg]],
+)
+
+s_peaks = DatasetSpec(
+    x=lam_Hg[peaks_hg],
+    y=A_Hg[peaks_hg],
+    label="Peaks from find_peaks",
+    marker="x",
+    line="None",
+)
 s_gauss = DatasetSpec(
-    t_gauss,
-    results_Hg_y,
-    label=f'Gaussian Fit', marker='.', line='None', linewidth=2
+    x=lambda_peaks,
+    y=np.array([peak[1] for peak in line_peaks]),
+    label=f'Peaks from Gaussian Fit',
+    marker='.',
+    line='None',
 )
-
 
 plot_data(
-    [s_hg, s_peaks, s_widths, s_gauss],
+    [s_hg, s_peaks, s_gauss],
     title=f'Ruby Data: Hg',
-    xlabel='Time (s)',
-    ylabel='Amplitude',
+    xlabel='Wavelength (nm)',
+    ylabel='Amplitude (normalized)',
     filename=f'Plots/Hg_lines.pdf',
     height=15,
-    plot=False
+    color_seed=89,
+    plot=True
 )
 
 
+# --------------------------------------------------------------------------------
+# --- Plotting all other data ----------------------------------------------------
+# --------------------------------------------------------------------------------
+# Build specs for all non-Hg datasets
+names = ['diff', 'Xe', 'Ruby']
 
-for key in data.keys():
+specs_by_key: dict[str, DatasetSpec] = {}
+for key in sorted(data.keys()):
     if key == 'Hg_lines':
         continue
-    plot_data(
-        [DatasetSpec(data[key]['t'], data[key]['A'], label=key, marker='None', line='-')],
-        title=f'Ruby Data: {key}',
-        xlabel='Time (s)',
-        ylabel='Amplitude',
-        filename=f'Plots/{key}.pdf',
-        height=15,
-        plot=False
+    specs_by_key[key] = DatasetSpec(
+        x=data[key]['lambda'],
+        y=data[key]['A'],
+        label=key,
+        marker='None',
+        line='-',
     )
 
+# Group datasets by prefix
+grouped: dict[str, list[DatasetSpec]] = {name: [] for name in names}
+for key, spec in specs_by_key.items():
+    for name in names:
+        if key.startswith(name):
+            grouped[name].append(spec)
+            break
 
-Hg_lines = [253.6517*2, 365.0153, 398.3931, 404.6563, 435.8328, 546.0735, 567.7105, 579.663, 614.9475]
+# Plot each group
+for k, specs in grouped.items():
+    if not specs:
+        continue
+    plot_data(
+        specs,
+        title=f'Ruby Data: N and B lines with {k} Spectrum',
+        xlabel='Wavelength (nm)',
+        ylabel='Amplitude',
+        filename=f'Plots/N_B_lines_{k}.pdf',
+        height=15,
+        plot=True
+    )
+
 
