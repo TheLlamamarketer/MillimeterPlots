@@ -1,5 +1,4 @@
 from __future__ import annotations
-import re
 import types
 import warnings
 """
@@ -751,8 +750,9 @@ def plot_data(
                     yf = s.fit_y  # assume array-like
                 yf = np.asarray(yf, dtype=float)
                 label_fit = f"{s.label} Fit" if (s.label and s.fit_label) else None
-                line_fit, = ax.plot(xf, yf, linestyle=s.fit_line, color=color, linewidth=max(1.2, s.linewidth),
-                                    label=label_fit, zorder=s.zorder+1)
+                color_fit = s.fit_color or (color_map[_ds_key(s)] if s.fit_color_group is None else color)
+                line_fit, = ax.plot(xf, yf, linestyle=s.fit_line, color=color_fit, linewidth=max(1.2, s.linewidth),
+                                    label=label_fit, zorder=s.zorder+2)
                 if outline:
                     line_fit.set_path_effects([
                         pe.Stroke(linewidth=line_fit.get_linewidth()+outline_width, foreground=oc),
