@@ -2,9 +2,12 @@ import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import scipy
 from scipy.signal import find_peaks, peak_widths
-import scipy.constants as consts
+from scipy.interpolate import make_splrep, interp1d
+from scipy.optimize import fsolve, minimize_scalar
+from SVG_ST import spline_A2, spline_T2, spline_T1
+
+
 
 repo_root = Path(__file__).resolve().parents[2]
 if str(repo_root) not in sys.path:
@@ -19,7 +22,7 @@ source_dir = Path('FP/Ruby/Data')
 # Calibration parameters determined from Hg lines
 Step_corrected = 0.59796398
 Start_offset = 350 - 346.666132
-B_val = 765.0 # cm^-1
+B_val = 765.0 # cm^-1  or 638.0
 
 Hg_lines = np.array([365.0153, 404.6563, 435.8328, 253.6517*2, 546.0735, 576.9598, 579.0663, 296.7280*2, 312.5668*2, 313.16935000*2])
 
@@ -122,12 +125,13 @@ data_hg = {
     'fitted': lambda_peaks,
     'dfitted': [result_Hg.params['b'].stderr for result_Hg in results_Hg_y],
     'diff': lambda_peaks - Hg_lines,
+    'original': t_hg_peaks*0.6 + 350,
 }
 
 
 headers_hg = {
-    'linelist':     {'label': '{$Hg_{lines}/nm$}', 'intermed': True },
-    'fitted':       {'label': '{$Hg_{fitted}/nm$}', 'intermed': True, 'err': data_hg['dfitted']},
+    'linelist':     {'label': '{${Hg}_{lines}/nm$}', 'intermed': True },
+    'fitted':       {'label': '{${Hg}_{fit}/nm$}', 'intermed': True, 'err': data_hg['dfitted']},
     'diff':         {'label': '{$\\Delta Hg/nm$}', 'intermed': True},
 }
 
@@ -192,13 +196,40 @@ plot_data(
 )
 
 
+
+
+
+
+
+
+
+
+
 # --------------------------------------------------------------------------------
 # --- Plotting all other data ----------------------------------------------------
 # --------------------------------------------------------------------------------
-# Build specs for all non-Hg datasets
-names = ['diff', 'Xe', 'Ruby']
+
+
+
+
+names = [ 'Xe', 'Ruby'] #'diff',
 
 data['Ruby_N']['A'] *= 1.02669405
+
+
+
+
+
+
+
+
+
+
+data['diff_B']['lambda'] -= 0.185
+data['diff_N']['lambda'] -= 0.185
+
+
+
 
 for name in names:
 
@@ -241,18 +272,11 @@ for key in sorted(data.keys()):
     bkey = f"{prefix}_B"
     is_ruby = prefix == 'Ruby'
 
-    if bkey in data:
-        # Use baseline (minimum) from the corresponding _B dataset
-        base_min = np.min(data[bkey]['A']) if is_ruby else np.min(-data[bkey]['A'])
-        y = (data[key]['A'] - base_min) if is_ruby else (-data[key]['A'] - base_min)
-    else:
-        # Fallback to per-dataset minimum if no _B reference exists
-        y = (data[key]['A'] - np.min(data[key]['A'])) if is_ruby else (-data[key]['A'] - np.min(-data[key]['A']))
     
-
+    data[key]['A'] = data[key]['A'] if is_ruby else -data[key]['A']
     specs_by_key[key] = DatasetSpec(
         x=data[key]['lambda'],
-        y=y,
+        y=data[key]['A'],
         label=key,
         marker='None',
         line='-',
@@ -276,37 +300,42 @@ for k, specs in grouped.items():
         xlabel='Wavelength (nm)',
         ylabel='Amplitude',
         filename=f'Plots/N_B_lines_{k}.pdf',
-        log_scale= (None, 10),
         height=15,
         plot=False
     )
 
 
-s_diff = DatasetSpec(x=data['diff_B']['lambda'], y=np.log10(1/np.clip(-data['diff_B']['A'], 1e-12, None)), label='Ruby_B / Xe_B (transmittance)', marker='None', line='-')
-
-#results_diff = lmfit(xdata=lam_B, ydata=np.log10(1/T_B), model="gaussian", initial_params={'b': 408, 'c': 1.0})
 
 
 
-plot_data(
-    [s_diff],
-    title=f'Ruby Data: Difference',
-    xlabel='Wavelength (nm)',
-    ylabel='Absorbance (A)',
-    filename=f'Plots/Difference.pdf',
-    log_scale=(None, None),
-    height=15,
-    plot=False
-)
 
 
 
-# Compute transmittance Ruby_B / Xe_B using interpolation onto Ruby_B wavelength grid
+
+
+
+
+
+# --------------------------------------------------------------------------------
+# --- Compute transmittance Ruby_B / Xe_B and fit peaks --------------------------
+# --------------------------------------------------------------------------------
+
+
+
 def compute_ratio(lam_num, I, lam_den, I_0, eps=1e-12, ngrid=None):
     lam_num = np.asarray(lam_num, dtype=float)
     I = np.asarray(I, dtype=float)
     lam_den = np.asarray(lam_den, dtype=float)
     I_0 = np.asarray(I_0, dtype=float)
+    
+    lam_num_sort = np.argsort(lam_num)
+    lam_num = lam_num[lam_num_sort]
+    I = I[lam_num_sort]
+    
+    lam_den_sort = np.argsort(lam_den)
+    lam_den = lam_den[lam_den_sort]
+    I_0 = I_0[lam_den_sort]
+
 
     lo = max(lam_num.min(), lam_den.min())
     hi = min(lam_num.max(), lam_den.max())
@@ -315,21 +344,64 @@ def compute_ratio(lam_num, I, lam_den, I_0, eps=1e-12, ngrid=None):
 
     n = int(ngrid or max(len(lam_num), len(lam_den)))
     grid = np.linspace(lo, hi, n)
-    num_i = np.interp(grid, lam_num, I)
-    den_i = np.interp(grid, lam_den, I_0)
+    num_i = make_splrep(lam_num, I, s=0.0)(grid)
+    den_i = make_splrep(lam_den, I_0, s=0.0)(grid)
     mask = np.abs(den_i) > eps
     if mask.sum() == 0:
         return np.array([], dtype=float), np.array([], dtype=float)
     T = num_i[mask] / den_i[mask]
     T = np.clip(T, eps, None)
-    # debug info (small, helpful when running locally)
     print(f"compute_ratio: grid_points={n}, valid_points={mask.sum()}, overlap=({lo:.3f},{hi:.3f})")
     return grid[mask], T
 
-lam_B, T_B = compute_ratio(data['Ruby_B']['lambda'], -data['Ruby_B']['A'], data['Xe_B']['lambda'], data['Xe_B']['A'], eps=1e-6)
 
-initial_T_1 = 406.60
-initial_T_2 = 561.46
+
+
+
+
+
+plot_data(
+    [DatasetSpec(x=data['diff_B']['lambda'], y=data['diff_B']['A'], label='diff_B', marker='None', line='-'),
+     DatasetSpec(x=data['Xe_B']['lambda'], y=data['Xe_B']['A'], label='Xe_B', marker='None', line='-')],
+    title=f'Ruby Data: Difference',
+    xlabel='Wavelength (nm)',
+    ylabel='Intensity I',
+    height=15,
+    plot=False
+)
+
+
+
+
+
+
+
+lam_diff_B, T_diff_B = compute_ratio(data['diff_B']['lambda'], data['diff_B']['A'], data['Xe_B']['lambda'], data['Xe_B']['A'])
+print(lam_diff_B, T_diff_B)
+s_diff = DatasetSpec(x=lam_diff_B, y=T_diff_B, label='diff_B / Xe_B (Absorbance)', marker='None', line='-') #np.log(1/(1-T_diff_B))
+
+#results_diff = lmfit(xdata=lam_diff_B, ydata=np.log10(1/T_diff_B), model="gaussian", initial_params={'b': 408, 'c': 1.0})
+
+
+plot_data(
+    [s_diff],
+    title=f'Ruby Data: Difference',
+    xlabel='Wavelength (nm)',
+    ylabel='Absorbance (A)',
+    filename=f'Plots/Difference.pdf',
+    height=15,
+    plot=False
+)
+
+
+
+# Compute transmittance Ruby_B / Xe_B using interpolation onto Ruby_B wavelength grid
+
+
+lam_B, T_B = compute_ratio(data['Ruby_B']['lambda'], data['Ruby_B']['A'], data['Xe_B']['lambda'], data['Xe_B']['A'], eps=1e-6)
+
+initial_T_1 = 408.0
+initial_T_2 = 558.0
 mask_408 = (lam_B >= initial_T_1 - 15) & (lam_B <= initial_T_1 + 15)
 mask_560 = (lam_B >= initial_T_2 - 25) & (lam_B <= initial_T_2 + 25)
 
@@ -351,8 +423,8 @@ print(results_diff_T_2.fit_report())
 
 const = 10**7 / B_val
 
-print(f"Resulting centers: ^4 T_1 fit = {results_diff_T_1.params['b'].value:.2f} ± {results_diff_T_1.params['b'].stderr:.2f}, ^4 T_2 fit = {results_diff_T_2.params['b'].value:.2f} ± {results_diff_T_2.params['b'].stderr:.2f}")
-print(f"Resulting normed Emergies by B: ^4 T_1 = {const/ results_diff_T_1.params['b'].value:.2f}, ^4 T_2 = {const/ results_diff_T_2.params['b'].value:.2f} with ratio {results_diff_T_2.params['b'].value / results_diff_T_1.params['b'].value:.4f}")
+print(f"Resulting centers: ^4 T_1 fit = {results_diff_T_1.params['b'].value:.2f} ± {results_diff_T_1.params['b'].stderr:.2f}, ^4 T_2 fit = {results_diff_T_2.params['b'].value:.2f} ± {results_diff_T_2.params['b'].value:.2f}")
+print(f"Resulting normed Emergies by B: ^4 T_1 = {const/ results_diff_T_1.params['b'].value:.3f} ± {const * results_diff_T_1.params['b'].stderr / (results_diff_T_1.params['b'].value**2):.3f}, ^4 T_2 = {const/ results_diff_T_2.params['b'].value:.3f}  ± {const * results_diff_T_2.params['b'].value / (results_diff_T_2.params['b'].value**2):.3f} with ratio {results_diff_T_2.params['b'].value / results_diff_T_1.params['b'].value:.4f}")
 
 
 plot_data(
@@ -361,7 +433,118 @@ plot_data(
     xlabel='Wavelength (nm)',
     ylabel='Absorbance (A)',
     filename=f'Plots/Abs_Ruby_Xe.pdf',
-    log_scale=(None, None),
+    height=15,
+    plot=False
+)
+
+def build_level(lbl, spline, fit_result, const, x, root_guess=2.0):
+    # energy from fit
+    b = fit_result.params['b'].value
+    b_err = fit_result.params['b'].stderr or 0.0
+    E_fit = const / b
+    dE_fit = const * b_err / b**2  # uncertainty propagation
+
+    # invert spline to get Dq at fitted energy
+    Dq_fit = fsolve(lambda Dq: spline(Dq) - E_fit, x0=root_guess)[0]
+
+    spec = DatasetSpec(
+        x=x,
+        y=spline(x),
+        label=lbl,
+        line='-',
+        marker='None',
+        axlines=[(E_fit, '-'), (E_fit + dE_fit, '-'), (E_fit - dE_fit, '-'), (Dq_fit, '|')],
+        axlines_label=[f'$E_{{{lbl[-2]}}}$ Fit', '', '', '$\\approx 1 Dq$'],
+        axlines_intervals=[(), (), (), (0, E_fit)],
+        axlines_line=['--', '--', '--', '-']
+    )
+    return E_fit, dE_fit, Dq_fit, spline, spec
+
+x = np.linspace(0, 4.154, 1000)
+E_T1, dE_T1, Dq_T1, spline_T1, s_T1 = build_level('$^4 T_1$', spline_T1, results_diff_T_1, const, x)
+E_T2, dE_T2, Dq_T2, spline_T2, s_T2 = build_level('$^4 T_2$', spline_T2, results_diff_T_2, const, x)
+
+print(f"Fitted Energy Levels by B: E_T1 = {E_T1:.3f} ± {dE_T1:.3f} at Dq/B = {Dq_T1:.3f}, E_T2 = {E_T2:.3f} ± {dE_T2:.3f} at Dq/B = {Dq_T2:.3f}, with ratio E_T2 / E_T1 = {E_T2 / E_T1:.4f}")
+print(f"Resulting 10 Dq from fits: 10 Dq = {10* Dq_T1 * B_val:.2f} cm^-1 or {10 * Dq_T1 * B_val * 1.23981e-4:.4f} eV from T1, 10 Dq = {10 * Dq_T2 * B_val:.2f} cm^-1 or {10 * Dq_T2 * B_val * 1.23981e-4:.4f} eV from T2")
+
+
+plot_data(
+    [s_T1, s_T2],
+    title=f'Ruby Data: Energy Levels',
+    xlabel='Dq / B',
+    ylabel='Energy E / B',
+    width=10,
+    height=17,
+    filename=f'Plots/Tanabe_Sugano_4T.pdf',
+    plot=False
+)
+
+
+
+
+
+# --------------------------------------------------------------------------------
+# --- Computing the narrow regions around 680nm and 720nm ----------------------
+# --------------------------------------------------------------------------------
+data['diff_N']['lambda'] -= 9.83 + 0.296
+data['Xe_N']['lambda'] -= 0.31
+
+
+
+
+    
+    
+
+
+lam_Xe_N = data['Xe_N']['lambda'][(670 <= data['Xe_N']['lambda']) & (data['Xe_N']['lambda'] <= 715)]
+lam_Ruby_N = data['Ruby_N']['lambda'][(670 <= data['Ruby_N']['lambda']) & (data['Ruby_N']['lambda'] <= 715)]
+lam_diff_N = data['diff_N']['lambda'][(670 <= data['diff_N']['lambda']) & (data['diff_N']['lambda'] <= 715)]
+
+I_Xe_N = data['Xe_N']['A'][(670 <= data['Xe_N']['lambda']) & (data['Xe_N']['lambda'] <= 715)]
+I_Ruby_N = data['Ruby_N']['A'][(670 <= data['Ruby_N']['lambda']) & (data['Ruby_N']['lambda'] <= 715)]
+I_diff_N = data['diff_N']['A'][(670 <= data['diff_N']['lambda']) & (data['diff_N']['lambda'] <= 715)]
+
+lam_Xe_N = np.asarray(lam_Xe_N, dtype=float)
+lam_Ruby_N = np.asarray(lam_Ruby_N, dtype=float)
+lam_diff_N = np.asarray(lam_diff_N, dtype=float)
+
+I_Xe_N = np.asarray(I_Xe_N, dtype=float)
+I_Ruby_N = np.asarray(I_Ruby_N, dtype=float)
+I_diff_N = np.asarray(I_diff_N, dtype=float)
+
+
+lam_Xe_sort = np.argsort(lam_Xe_N)
+lam_Xe_N = lam_Xe_N[lam_Xe_sort]
+I_Xe_N = I_Xe_N[lam_Xe_sort]
+
+lam_Ruby_sort = np.argsort(lam_Ruby_N)
+lam_Ruby_N = lam_Ruby_N[lam_Ruby_sort]
+I_Ruby_N = I_Ruby_N[lam_Ruby_sort]
+
+lam_diff_sort = np.argsort(lam_diff_N)
+lam_diff_N = lam_diff_N[lam_diff_sort]
+I_diff_N = I_diff_N[lam_diff_sort]
+
+n = int(max(len(lam_Xe_N), len(lam_Ruby_N)))
+grid = np.linspace(670, 715, n)
+Xe_N = make_splrep(lam_Xe_N, I_Xe_N, s=0.0)(grid)
+Ruby_N = make_splrep(lam_Ruby_N, I_Ruby_N, s=0.0)(grid)
+Diff_N = make_splrep(lam_diff_N, I_diff_N, s=0.0)(grid)
+
+
+
+
+plot_data(
+    [DatasetSpec(x=grid, y=Diff_N, label='diff_B', marker='None', line='-'),
+     DatasetSpec(x=grid,   y=Xe_N, label='Xe_B', marker='None', line='-'),
+     DatasetSpec(x=grid, y=Ruby_N, label='Ruby_B', marker='None', line='-'),
+     DatasetSpec(x=grid, y=-Ruby_N+Xe_N, label='Difference', marker='None', line='--')],
+    title=f'Ruby Data: Difference',
+    xlabel='Wavelength (nm)',
+    ylabel='Intensity I',
     height=15,
     plot=True
 )
+
+
+

@@ -74,10 +74,14 @@ class DatasetSpec:
     # Axlines 
     axlines: List[Tuple[float, str]] | None = None  # list of (position, line_style) to draw vertical/horizontal lines, eg. [(2.5, "h"), (3.4, "v")]
     axlines_label: List[str] | None = None
+    axlines_show_label: bool | List[bool] | None = None  # whether to show text labels next to axlines (bool for all, or list per-line)
     axlines_line: str = "--"
     axlines_intervals: List[Tuple[float, float]] | None = None
     axlines_color: str | None = None
     axlines_color_group: str | None = None
+
+    # General text annotations: list of dicts with keys: 'x', 'y', 'text', optional: 'offset', 'fontsize', 'color', 'arrow', 'bbox'
+    text_annotations: List[Dict[str, Any]] | None = None
 
     # confidence intervals: list of (lower, upper) arrays matching x (or fit_x)
     confidence: List[Tuple[Sequence[float] | None, Sequence[float] | None]] | None = None
@@ -316,10 +320,12 @@ def normalize_dataset(
             fit_error_lines=d.get("fit_error_lines"),
             axlines=d.get("axlines"),
             axlines_label=d.get("axlines_label"),
+            axlines_show_label=d.get("axlines_show_label"),
             axlines_line=d.get("axlines_line", "--"),
             axlines_color=d.get("axlines_color"),
             axlines_color_group=d.get("axlines_color_group"),
             axlines_intervals=d.get("axlines_intervals"),
+            text_annotations=d.get("text_annotations"),
             confidence=d.get("confidence"),
             confidence_label=d.get("confidence_label", True),
             aggregate_duplicates=d.get("aggregate_duplicates", False),
@@ -679,6 +685,16 @@ def plot_data(
                     if len(al_labels) < n_lines:
                         al_labels += [None] * (n_lines - len(al_labels))
 
+                # show_label: controls whether to draw text annotation next to the line
+                if s.axlines_show_label is None:
+                    al_show_label = [False] * n_lines
+                elif isinstance(s.axlines_show_label, bool):
+                    al_show_label = [s.axlines_show_label] * n_lines
+                else:
+                    al_show_label = list(s.axlines_show_label)
+                    if len(al_show_label) < n_lines:
+                        al_show_label += [False] * (n_lines - len(al_show_label))
+
                 # intervals (optional ranges): align length, default None
                 if s.axlines_intervals is None:
                     al_intervals = [None] * n_lines
@@ -693,8 +709,10 @@ def plot_data(
                 for i in range(n_lines):
                     pos = s.axlines[i]
                     lbl = al_labels[i]
+                    show_lbl = al_show_label[i]
                     inter = al_intervals[i]
                     al_color = al_colors[i]
+                    al_line = s.axlines_line[i] if isinstance(s.axlines_line, (list, tuple)) and len(s.axlines_line) > i else s.axlines_line
 
                     if pos is None:
                         continue
@@ -716,14 +734,14 @@ def plot_data(
 
                     try:
                         if o.startswith("h") or o.startswith("-"):
-                            xmin = low if low is not None else (xlim[0] if xlim is not None else None)
-                            xmax = high if high is not None else (xlim[1] if xlim is not None else None)
-                            al = ax.hlines(y=float(val), xmin=xmin, xmax=xmax, linestyle=s.axlines_line, color=al_color, linewidth=1.0, zorder=s.zorder,
+                            xmin = low if low is not None else (xlim[0] if xlim is not None else x.min())
+                            xmax = high if high is not None else (xlim[1] if xlim is not None else x.max())
+                            al = ax.hlines(y=float(val), xmin=xmin, xmax=xmax, linestyle=al_line, color=al_color, linewidth=1.0, zorder=s.zorder,
                                             label=lbl)
                         elif o.startswith("v") or o.startswith("|") or o.startswith("x"):
-                            ymin = low if low is not None else (ylim[0] if ylim is not None else None)
-                            ymax = high if high is not None else (ylim[1] if ylim is not None else None)
-                            al = ax.vlines(x=float(val), ymin=ymin, ymax=ymax, linestyle=s.axlines_line, color=al_color, linewidth=1.0, zorder=s.zorder,
+                            ymin = low if low is not None else (ylim[0] if ylim is not None else y.min())
+                            ymax = high if high is not None else (ylim[1] if ylim is not None else y.max())
+                            al = ax.vlines(x=float(val), ymin=ymin, ymax=ymax, linestyle=al_line, color=al_color, linewidth=1.0, zorder=s.zorder,
                                             label=lbl)
                         else:
                             # unknown orientation, skip
@@ -740,6 +758,50 @@ def plot_data(
                             ])
                         except Exception:
                             pass
+                    # If axlines_show_label is True for this line and a label exists, place it next to the drawn line
+                    if lbl and show_lbl:
+                        try:
+                            # Use the interval bounds for text placement (not full axis limits)
+                            if o.startswith("h") or o.startswith("-"):
+                                text_xmin = low if low is not None else (xlim[0] if xlim is not None else x.min())
+                                text_xmax = high if high is not None else (xlim[1] if xlim is not None else x.max())
+                                text_bounds = (text_xmin, text_xmax)
+                                cur_ylim = ax.get_ylim()
+                                _place_text_near_axline(ax, orientation=o, val=float(val), text=lbl,
+                                                        color=al_color, x_bounds=text_bounds, y_bounds=cur_ylim,
+                                                        outline=outline, outline_color=oc)
+                            else:  # vertical
+                                text_ymin = low if low is not None else (ylim[0] if ylim is not None else y.min())
+                                text_ymax = high if high is not None else (ylim[1] if ylim is not None else y.max())
+                                text_bounds = (text_ymin, text_ymax)
+                                cur_xlim = ax.get_xlim()
+                                _place_text_near_axline(ax, orientation=o, val=float(val), text=lbl,
+                                                        color=al_color, x_bounds=cur_xlim, y_bounds=text_bounds,
+                                                        outline=outline, outline_color=oc)
+                        except Exception:
+                            # best-effort only; do not fail plotting on annotation errors
+                            pass
+
+            # General text annotations
+            if s.text_annotations:
+                for ann in s.text_annotations:
+                    try:
+                        ann_x = ann.get('x')
+                        ann_y = ann.get('y')
+                        ann_text = ann.get('text')
+                        if ann_x is None or ann_y is None or ann_text is None:
+                            continue
+                        ann_offset = ann.get('offset', (6, 6))
+                        ann_fontsize = ann.get('fontsize', 8)
+                        ann_color = ann.get('color', color)
+                        ann_arrow = ann.get('arrow', False)
+                        ann_bbox = ann.get('bbox')
+                        annotate_point(ax, ann_x, ann_y, ann_text, offset=ann_offset,
+                                      fontsize=ann_fontsize, color=ann_color,
+                                      arrow=ann_arrow, bbox=ann_bbox)
+                    except Exception:
+                        # best-effort: skip problematic annotations
+                        pass
 
             # Fit lines
             if s.fit_y is not None or isinstance(s.fit_y, types.LambdaType):
@@ -901,6 +963,126 @@ def _normalize_err(err: Any, base: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         return lo, hi
     e = np.asarray(err, dtype=float)
     return e, e
+
+
+def annotate_point(
+    ax: Axes,
+    x: float,
+    y: float,
+    text: str,
+    *,
+    offset: Tuple[float, float] = (6, 6),  # offset in points (x, y)
+    fontsize: float = 8,
+    color: str | None = None,
+    arrow: bool = False,
+    bbox: dict | None = None,
+    **kwargs,
+) -> None:
+    """Annotate a point (x, y) in data coordinates with text offset in points.
+
+    Parameters:
+    - ax: target Axes
+    - x, y: data coordinates of the point
+    - text: label to show
+    - offset: tuple in points (x_offset, y_offset)
+    - arrow: whether to draw a small arrow from the text to the point
+    - bbox: dictionary for matplotlib textbox props (facecolor, alpha, boxstyle)
+    - kwargs: passed to `ax.annotate` (e.g., ha, va)
+    """
+    if color is None:
+        color = kwargs.pop("color", None)
+    if bbox is None:
+        bbox = dict(boxstyle="round,pad=0.2", fc=(1, 1, 1, 0.85), ec="none")
+    arrowprops = dict(arrowstyle="-", linewidth=0.6, color=color) if arrow else None
+    ax.annotate(
+        text,
+        xy=(x, y),
+        xytext=(offset[0], offset[1]),
+        textcoords="offset points",
+        fontsize=fontsize,
+        color=color,
+        bbox=bbox,
+        arrowprops=arrowprops,
+        **kwargs,
+    )
+
+
+def add_side_text(
+    ax: Axes,
+    text: str,
+    *,
+    side: str = "right",
+    xpad: float = 0.01,
+    y: float | None = None,
+    fontsize: float = 9,
+    color: str | None = None,
+    bbox: dict | None = None,
+) -> None:
+    """Place text in the figure margins using axes fraction coordinates.
+
+    side: 'right'|'left'|'top'|'bottom'
+    xpad: fraction of axes width to pad from the chosen side
+    y: fraction of axes height for vertical placement (None -> center)
+    """
+    if bbox is None:
+        bbox = dict(boxstyle="round,pad=0.2", fc=(1, 1, 1, 0.0), ec="none")
+    if color is None:
+        color = None
+    y = 0.5 if y is None else y
+    if side == "right":
+        ax.text(1.0 - xpad, y, text, transform=ax.transAxes, fontsize=fontsize, va="center", ha="right", color=color, bbox=bbox)
+    elif side == "left":
+        ax.text(xpad, y, text, transform=ax.transAxes, fontsize=fontsize, va="center", ha="left", color=color, bbox=bbox)
+    elif side == "top":
+        ax.text(0.5, 1.0 - xpad, text, transform=ax.transAxes, fontsize=fontsize, va="top", ha="center", color=color, bbox=bbox)
+    elif side == "bottom":
+        ax.text(0.5, xpad, text, transform=ax.transAxes, fontsize=fontsize, va="bottom", ha="center", color=color, bbox=bbox)
+
+
+def _place_text_near_axline(
+    ax: Axes,
+    *,
+    orientation: str,
+    val: float,
+    text: str,
+    color: str | None = None,
+    x_bounds: Tuple[float, float],
+    y_bounds: Tuple[float, float],
+    outline: bool = False,
+    outline_color: str | None = None,
+    fontsize: float = 8,
+) -> None:
+    """Place a short label next to a horizontal or vertical axline.
+
+    This does a a best-effort placement inside the axes area so labels remain visible.
+    """
+    o = str(orientation).lower()
+    xmin, xmax = x_bounds
+    ymin, ymax = y_bounds
+    x_span = max(1e-12, xmax - xmin)
+    y_span = max(1e-12, ymax - ymin)
+    color = color or "#000000"
+
+    if o.startswith("h") or o.startswith("-"):
+        # place at the right end, slightly inset
+        x_text = xmax - 0.015 * x_span
+        y_text = val
+        ha = "right"
+        va = "center"
+    else:
+        # vertical: place at the top, slightly inset
+        x_text = val
+        y_text = ymax - 0.02 * y_span
+        ha = "center"
+        va = "top"
+
+    txt = ax.text(x_text, y_text, text, color=color, fontsize=fontsize, ha=ha, va=va, zorder=1000,
+                  bbox=dict(boxstyle="round,pad=0.2", fc=(1,1,1,0.6), ec="none"))
+    if outline and outline_color:
+        try:
+            txt.set_path_effects([pe.Stroke(linewidth=1.5, foreground=outline_color), pe.Normal()])
+        except Exception:
+            pass
 
 
 def _draw_dense_grid(
