@@ -8,7 +8,6 @@ from scipy.optimize import fsolve, minimize_scalar
 from SVG_ST import spline_A2, spline_T2, spline_T1
 
 
-
 repo_root = Path(__file__).resolve().parents[2]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
@@ -20,8 +19,8 @@ from Functions.help import *
 source_dir = Path('FP/Ruby/Data')
 
 # Calibration parameters determined from Hg lines
-Step_corrected = 0.59796398
-Start_offset = 350 - 346.666132
+Step_corrected = 0.59786924     # converts 0.6nm/1s steps to correct steps
+Start_corrected = 346.671436
 B_val = 765.0 # cm^-1  or 638.0
 
 Hg_lines = np.array([365.0153, 404.6563, 435.8328, 253.6517*2, 546.0735, 576.9598, 579.0663, 296.7280*2, 312.5668*2, 313.16935000*2])
@@ -31,18 +30,14 @@ data: dict[str, np.ndarray] = {}
 
 
 for file in sorted(source_dir.iterdir()):
-    if not file.is_file() or file.stem.lower() == '9_diff_b2':
-        continue
     
     # Read first 3 lines separately
     with open(file, 'r') as f:
-        start, step, direction = [float(f.readline().strip()) for _ in range(3)]
+        start, step0, direction = [float(f.readline().strip()) for _ in range(3)]
 
-    if step == 0.6:
-        step = Step_corrected
-    elif step == 1.0:
-        step = Step_corrected * 10/6
-    start -= Start_offset
+    Ratio = Step_corrected / step0 if step0 == 0.6 else 10/6 * Step_corrected / step0 
+    
+    Offset = Start_corrected - Ratio * 350
     
     raw = pd.read_csv(
         file, header=None, decimal=".", sep=r"\s+", engine="python", skiprows=3).to_numpy(dtype=float)
@@ -55,15 +50,15 @@ for file in sorted(source_dir.iterdir()):
     data[key] = {
         't': t, 
         'A': A, 
-        'header': [start, step, direction],
-        'lambda': start + direction * step * t
+        'header': [start, step0, direction, Ratio],
+        'lambda': Offset + Ratio * (start + direction * step0 * t)
     }
 
 # --------------------------------------------------------------------------------
 # --- Analyze Hg lines for calibration -------------------------------------------
 # --------------------------------------------------------------------------------
-
 data['Hg_lines']['A'] = -(data['Hg_lines']['A'] + np.min(-data['Hg_lines']['A']))          # invert and shift to zero baseline as we have emission lines
+
 
 A_Hg = data['Hg_lines']['A']
 A_Hg = A_Hg / np.max(A_Hg)  # normalize to max
@@ -72,86 +67,101 @@ data['Hg_lines']['A'] = A_Hg
 lam_Hg = data['Hg_lines']['lambda']
 
 
-# find peaks
-peaks_hg, props_hg = find_peaks(A_Hg,  height=0.012)
-widths_hg = peak_widths(A_Hg, peaks_hg, rel_height=0.21)
+def find_Hg_peaks(lam_Hg, A_Hg, Hg_lines):
 
-
-results_Hg_y = np.array([])
-t_gauss = np.array([])
-
-line_peaks: list[tuple[float, float]] = [] 
-
-for i, peak_i in enumerate(peaks_hg):
-    widths = widths_hg[0][i] * 0.1
-    width_heights = widths_hg[1][i]
-    left_ips = int(widths_hg[2][i])
-    right_ips = int(widths_hg[3][i])
+    # find peaks
+    peaks_hg, props_hg = find_peaks(A_Hg,  height=0.012)
+    widths_hg = peak_widths(A_Hg, peaks_hg, rel_height=0.21)
     
-    #expand = int(widths / 2)
-    expand = 0
-    fit_left = max(0, left_ips - expand)
-    fit_right = min(len(lam_Hg) - 1, right_ips + expand)
+    results_Hg_y = np.array([])
+    line_peaks: list[tuple[float, float]] = [] 
+    
+    for i, peak_i in enumerate(peaks_hg):      
+        half_win = 0.3748 * widths_hg[0][i]       
 
-    mask = (lam_Hg >= lam_Hg[fit_left]) & (lam_Hg <= lam_Hg[fit_right])
+        fit_left  = max(0, int(np.floor(peak_i - half_win)))
+        fit_right = min(len(lam_Hg) - 1, int(np.ceil(peak_i + half_win)))
+        
+        lam_per_peak = lam_Hg[fit_left:fit_right + 1]
+        A_per_peak   = A_Hg[fit_left:fit_right + 1]
+        
+        
+        delta_lambda = np.mean(np.diff(lam_per_peak)) 
+        fwhm_lambda  = widths_hg[0][i] * delta_lambda
+        sigma_init   = fwhm_lambda / 2.355
     
-    lam_per_peak = lam_Hg[mask]
-    A_per_peak = A_Hg[mask]
+        result_Hg = lmfit(
+            xdata= lam_per_peak,
+            ydata= A_per_peak,
+            model="gaussian",
+            initial_params={'c': sigma_init, 'b': lam_Hg[peak_i]} # a * np.exp(-((x - b) / c)**2 / 2) + d
+        )
+        
+        results_Hg_y = np.append(results_Hg_y, [result_Hg], axis=0)
+        b_val = result_Hg.params['b'].value
+        
+        line_peaks.append((b_val, props_hg['peak_heights'][i]))
+
+
+    hg_start, hg_step, hg_direction, Ratio = data["Hg_lines"]["header"]
+    lambda_peaks = np.array([peak[0] for peak in line_peaks])
     
-    result_Hg = lmfit(
-        xdata= lam_per_peak,
-        ydata= A_per_peak,
-        model="gaussian",
-        initial_params={'c': widths/2.355, 'b': lam_Hg[peak_i]} # a * np.exp(-((x - b) / c)**2 / 2) + d
+    t_hg_peaks = ((lambda_peaks-Start_corrected)/Ratio + 350 - hg_start)/(hg_direction * hg_step)
+    #t_hg_peaks = data["Hg_lines"]["t"][peaks_hg]
+
+
+    data_hg = {
+        'linelist': Hg_lines,
+        'fitted': lambda_peaks,
+        'dfitted': [result_Hg.params['b'].stderr for result_Hg in results_Hg_y],
+        'diff': lambda_peaks - Hg_lines,
+    }
+
+    headers_hg = {
+        'linelist':     {'label': '{${Hg}_{lines}/nm$}', 'intermed': True },
+        'fitted':       {'label': '{${Hg}_{fit}/nm$}', 'intermed': True, 'err': data_hg['dfitted']},
+        'diff':         {'label': '{$\\Delta Hg/nm$}', 'intermed': True},
+    }
+
+    print_standard_table(
+        data_hg,
+        headers_hg,
+        caption="Fitted Hg line positions and their differences to the known literature values.",
+        label="tab:ruby_hg_lines",
+        show=True
+    )
+    print(f"RMS of differences: {np.sqrt(np.mean((lambda_peaks - Hg_lines)**2)):.3g} nm")
+
+    results_line_hg = lmfit(xdata=t_hg_peaks, ydata=Hg_lines, model="linear")
+
+    fighg, axhg = plot_data(
+        [DatasetSpec(x=t_hg_peaks, y=Hg_lines, label='Hg Lines from NIST', color='tab:blue', marker='x', fit_x=t_hg_peaks, fit_y=results_line_hg.eval(x=t_hg_peaks), fit_label='Linear Fit', fit_color='tab:cyan')],
+        title=f'Hg Line Calibration',
+        ylabel='Wavelength (nm)',
+        xlabel='Time t/s',
+        legend_position='center left',
+        color_seed=89,
+        plot='figure',
     )
     
-    #lam_gauss = np.linspace(lam_per_peak[0], lam_per_peak[-1], 100)
-    #results_Hg_y = np.append(results_Hg_y, result_Hg.eval(x=lam_gauss), axis=0)   
+    axhg.tick_params(axis='y', labelcolor='tab:blue')
     
-    results_Hg_y = np.append(results_Hg_y, [result_Hg], axis=0)
-    b_val = result_Hg.params['b'].value
+    ax2 = axhg.twinx()
+    ax2.set_ylabel('Fit Residuals (nm)', color='tab:orange')
+    ax2.plot(t_hg_peaks, results_line_hg.eval(x=t_hg_peaks) - Hg_lines, 'x', label='Fit Residuals', color='tab:orange')
+    ax2.tick_params(axis='y', labelcolor='tab:orange')
+    ax2.legend(loc='lower right')
+    fighg.tight_layout()
     
-    line_peaks.append((b_val, props_hg['peak_heights'][i])) # or result_Hg.eval(x=b_val) for amplitude
+    fighg.savefig(f'Plots/Hg_line_fit.pdf', bbox_inches="tight")
+    plt.show()
 
-
-hg_start, hg_step, hg_direction = data["Hg_lines"]["header"]
-lambda_peaks = np.array([peak[0] for peak in line_peaks])
-t_hg_peaks = (lambda_peaks - hg_start) / (hg_direction * hg_step)
-t_hg_peaks = data["Hg_lines"]["t"][peaks_hg]
-
-
-data_hg = {
-    'linelist': Hg_lines,
-    'fitted': lambda_peaks,
-    'dfitted': [result_Hg.params['b'].stderr for result_Hg in results_Hg_y],
-    'diff': lambda_peaks - Hg_lines,
-    'original': t_hg_peaks*0.6 + 350,
-}
-
-
-headers_hg = {
-    'linelist':     {'label': '{${Hg}_{lines}/nm$}', 'intermed': True },
-    'fitted':       {'label': '{${Hg}_{fit}/nm$}', 'intermed': True, 'err': data_hg['dfitted']},
-    'diff':         {'label': '{$\\Delta Hg/nm$}', 'intermed': True},
-}
-
-print_standard_table(
-    data_hg,
-    headers_hg,
-    caption="Fitted Hg line positions and their differences to the known literature values.",
-    label="tab:ruby_hg_lines",
-    show=True
-)
-
-results_line_hg = lmfit(xdata=t_hg_peaks, ydata=Hg_lines, model="linear")
-
-print_line = True
-
-
-if print_line:
     print(results_line_hg.fit_report())
-    print(f"a = {results_line_hg.params['a'].value:.3f} ± {results_line_hg.params['a'].stderr:.3f}, b = {results_line_hg.params['b'].value:.3f} ± {results_line_hg.params['b'].stderr:.3f}")
+    print(f"a = {print_round_val(results_line_hg.params['a'].value, results_line_hg.params['a'].stderr)} nm, b = {print_round_val(results_line_hg.params['b'].value, results_line_hg.params['b'].stderr)} nm/s")
 
+    return peaks_hg, line_peaks, results_line_hg, lambda_peaks
+
+peaks_hg, line_peaks, results_line_hg, lambda_peaks = find_Hg_peaks(lam_Hg, A_Hg, Hg_lines)
 
 # --------------------------------------------------------------------------------
 # --- Plotting the Hg Lines ------------------------------------------------------
@@ -201,10 +211,6 @@ plot_data(
 
 
 
-
-
-
-
 # --------------------------------------------------------------------------------
 # --- Plotting all other data ----------------------------------------------------
 # --------------------------------------------------------------------------------
@@ -214,7 +220,77 @@ plot_data(
 
 names = [ 'Xe', 'Ruby'] #'diff',
 
-data['Ruby_N']['A'] *= 1.02669405
+#data['Ruby_N']['A'] *= 1.02669405
+data['diff_B2']['A'] *= 10.0
+
+
+s_all = []
+for key in sorted(data.keys()):
+    if key == 'Hg_lines':
+        continue
+    prefix = key.split('_')[0]
+    second = key.split('_')[1]
+    data[key]['A'] = data[key]['A'] if prefix == 'Ruby' or second == 'Basis' else -data[key]['A']
+    s = DatasetSpec(
+        x=data[key]['lambda'],
+        y=data[key]['A'],
+        label=key,
+        marker='None',
+        line='-',
+    )
+    s_all.append(s)
+
+
+plot_data(
+    s_all,
+    title=f'All Spectra',
+    xlabel='$\\lambda (nm)$',
+    ylabel='Amplitude I',
+    filename=f'Plots/All.pdf',
+    color_seed=87,
+    plot=False
+)
+
+
+def find_lambda_shift(lam_ref, I_ref, lam, I, lam_range=None, max_shift=1.0):
+    lam_ref = np.asarray(lam_ref, float)
+    I_ref   = np.asarray(I_ref,   float)
+    lam     = np.asarray(lam,     float)
+    I       = np.asarray(I,       float)
+
+    s = np.argsort(lam_ref); lam_ref, I_ref = lam_ref[s], I_ref[s]
+    s = np.argsort(lam);     lam,     I     = lam[s],     I[s]
+
+
+    if lam_range is not None:
+        lo, hi = lam_range
+        mask_ref = (lam_ref >= lo) & (lam_ref <= hi)
+        mask     = (lam     >= lo-max_shift) & (lam     <= hi+max_shift)
+        lam_ref, I_ref = lam_ref[mask_ref], I_ref[mask_ref]
+        lam,     I     = lam[mask],         I[mask]
+    
+    # normalize Data so that median is 0 and peak-to-peak amplitude is 1
+    I_ref = (I_ref - np.median(I_ref)) / np.ptp(I_ref)
+    I     = (I     - np.median(I))     / np.ptp(I)
+    
+    
+    # interpolating functions for both so that we can evaluate at common points
+    f_ref = interp1d(lam_ref, I_ref, kind='linear', bounds_error=False, fill_value=np.nan)
+    f     = interp1d(lam,     I,     kind='linear', bounds_error=False, fill_value=np.nan)
+    
+    def mse(shift):
+        lam_common = lam_ref
+        y_ref = f_ref(lam_common)
+        y     = f(lam_common - shift)
+        mask  = ~np.isnan(y) & ~np.isnan(y_ref)
+        if mask.sum() < 10:
+            return 1e12
+        r = y_ref[mask] - y[mask]
+        
+        return float(np.mean(r*r))
+    
+    res = minimize_scalar(mse, bounds=(-max_shift, max_shift), method='bounded')
+    return float(res.x)
 
 
 
@@ -223,46 +299,58 @@ data['Ruby_N']['A'] *= 1.02669405
 
 
 
+ref_key = 'Xe_B'
+lam_ref = data[ref_key]['lambda']
+I_ref   = data[ref_key]['A']
+
+for key in sorted(data.keys()):
+    if key == 'Hg_lines':
+        continue
+    lam = data[key]['lambda']
+    I   = data[key]['A']
+    if key == ref_key:
+        continue
+    if np.min(lam) < 600:
+        shift = find_lambda_shift(lam_ref, I_ref, lam, I,
+                                lam_range=(450, 500),  
+                                max_shift=2.0) 
+    else:
+        shift = find_lambda_shift(data[key.split('_')[0]+'_B']['lambda'], data[key.split('_')[0]+'_B']['A'], lam, I,
+                                lam_range=(670, 715),  
+                                max_shift=2.0) 
+    data[key]['lambda'] += shift
+    print(f"Applied λ shift {shift:.3f} nm to {key}")
+    
+    
+    
+s_all = []
+for key in sorted(data.keys()):
+    if key == 'Hg_lines':
+        continue
+    prefix = key.split('_')[0]
+    second = key.split('_')[1]
+    s = DatasetSpec(
+        x=data[key]['lambda'],
+        y=data[key]['A'],
+        label=key,
+        marker='None',
+        line='-',
+    )
+    s_all.append(s)
 
 
-data['diff_B']['lambda'] -= 0.185
-data['diff_N']['lambda'] -= 0.185
+plot_data(
+    s_all,
+    title=f'All Spectra',
+    xlabel='$\\lambda (nm)$',
+    ylabel='Amplitude I',
+    filename=f'Plots/All.pdf',
+    color_seed=87,
+    plot=False
+)
 
+print('-'*100)
 
-
-
-for name in names:
-
-    lamB, yB = np.asarray(data[f'{name}_B']['lambda'],float), np.asarray(data[f'{name}_B']['A'],float)
-    lamN, yN = np.asarray(data[f'{name}_N']['lambda'],float), np.asarray(data[f'{name}_N']['A'],float)
-    # sort
-    si = np.argsort(lamB); lamB, yB = lamB[si], yB[si]
-    si = np.argsort(lamN); lamN, yN = lamN[si], yN[si]
-
-    # objective: shift B by off and compute MSE on overlap (interpolating B onto N grid)
-    def mse_off(off):
-        lb = lamB + off
-        lo = max(lb.min(), lamN.min()); hi = min(lb.max(), lamN.max())
-        if hi <= lo: return 1e12
-        mask = (lamN >= lo) & (lamN <= hi)
-        if mask.sum() < 4: return 1e12
-        yBinterp = np.interp(lamN[mask], lb, yB, left=np.nan, right=np.nan)
-        valid = ~np.isnan(yBinterp)
-        if valid.sum() < 4: return 1e12
-        r = yN[mask][valid] - yBinterp[valid]
-        return float((r*r).mean())
-
-    span = min(lamN.max()-lamN.min(), lamB.max()-lamB.min())
-    b = min(span/2.0, 50.0)
-
-    from scipy.optimize import minimize_scalar
-    res = minimize_scalar(mse_off, bounds=(-b,b), method='bounded')
-    best = float(res.x)
-
-    data[f'{name}_B']['lambda'] = data[f'{name}_B']['lambda'] + best
-    print(f"Applied lambda offset to {name}_B: {best:.6g}")
-
-#data['Ruby_B']['lambda'] += 0.6
 
 specs_by_key: dict[str, DatasetSpec] = {}
 for key in sorted(data.keys()):
@@ -272,8 +360,6 @@ for key in sorted(data.keys()):
     bkey = f"{prefix}_B"
     is_ruby = prefix == 'Ruby'
 
-    
-    data[key]['A'] = data[key]['A'] if is_ruby else -data[key]['A']
     specs_by_key[key] = DatasetSpec(
         x=data[key]['lambda'],
         y=data[key]['A'],
@@ -322,86 +408,72 @@ for k, specs in grouped.items():
 
 
 
-def compute_ratio(lam_num, I, lam_den, I_0, eps=1e-12, ngrid=None):
-    lam_num = np.asarray(lam_num, dtype=float)
-    I = np.asarray(I, dtype=float)
-    lam_den = np.asarray(lam_den, dtype=float)
-    I_0 = np.asarray(I_0, dtype=float)
-    
-    lam_num_sort = np.argsort(lam_num)
-    lam_num = lam_num[lam_num_sort]
-    I = I[lam_num_sort]
-    
-    lam_den_sort = np.argsort(lam_den)
-    lam_den = lam_den[lam_den_sort]
-    I_0 = I_0[lam_den_sort]
+def resample_to_grid(lam, I, grid):
+    lam = np.asarray(lam, float)
+    I   = np.asarray(I,   float)
+    s = np.argsort(lam)
+    lam, I = lam[s], I[s]
+    f = interp1d(lam, I, kind='linear', bounds_error=False, fill_value=np.nan)
+    return f(grid)
 
+def compute_ratio(lam_num, I, lam_den, I0, eps=1e-12, ngrid=None):
+    lam_num = np.asarray(lam_num, float)
+    lam_den = np.asarray(lam_den, float)
+    I       = np.asarray(I,       float)
+    I0      = np.asarray(I0,      float)
 
     lo = max(lam_num.min(), lam_den.min())
     hi = min(lam_num.max(), lam_den.max())
     if hi <= lo:
-        return np.array([], dtype=float), np.array([], dtype=float)
+        return np.array([]), np.array([])
 
     n = int(ngrid or max(len(lam_num), len(lam_den)))
     grid = np.linspace(lo, hi, n)
-    num_i = make_splrep(lam_num, I, s=0.0)(grid)
-    den_i = make_splrep(lam_den, I_0, s=0.0)(grid)
-    mask = np.abs(den_i) > eps
+
+    num_i = resample_to_grid(lam_num, I,  grid)
+    den_i = resample_to_grid(lam_den, I0, grid)
+
+    mask  = (np.abs(den_i) > eps) & ~np.isnan(num_i) & ~np.isnan(den_i)
     if mask.sum() == 0:
-        return np.array([], dtype=float), np.array([], dtype=float)
+        return np.array([]), np.array([])
+
     T = num_i[mask] / den_i[mask]
-    T = np.clip(T, eps, None)
-    print(f"compute_ratio: grid_points={n}, valid_points={mask.sum()}, overlap=({lo:.3f},{hi:.3f})")
-    return grid[mask], T
+    T = np.clip(T, eps, None) 
+    return grid[mask], T, num_i[mask], den_i[mask]
 
 
 
-
+lam_diff_B, T_diff_B, I_diff_B, I_Xe_B = compute_ratio(data['diff_B']['lambda'], data['diff_B']['A'], data['Xe_B']['lambda'], data['Xe_B']['A'])
+lam_B, T_B, I_Ruby_B, I_Xe_B2 = compute_ratio(data['Ruby_B']['lambda'], data['Ruby_B']['A'], data['Xe_B']['lambda'], data['Xe_B']['A'], eps=1e-4)
 
 
 
 plot_data(
     [DatasetSpec(x=data['diff_B']['lambda'], y=data['diff_B']['A'], label='diff_B', marker='None', line='-'),
-     DatasetSpec(x=data['Xe_B']['lambda'], y=data['Xe_B']['A'], label='Xe_B', marker='None', line='-')],
+     DatasetSpec(x=data['Xe_B']['lambda'], y=data['Xe_B']['A'], label='Xe_B', marker='None', line='-'),
+     DatasetSpec(x=lam_diff_B, y=I_diff_B, label='diff_B resampled', marker='None', line='-'),
+     DatasetSpec(x=lam_diff_B, y=I_Xe_B, label='Xe_B resampled', marker='None', line='-')],
     title=f'Ruby Data: Difference',
     xlabel='Wavelength (nm)',
-    ylabel='Intensity I',
+    ylabel='Amplitude I',
     height=15,
-    plot=False
+    plot=True
 )
 
-
-
-
-
-
-
-lam_diff_B, T_diff_B = compute_ratio(data['diff_B']['lambda'], data['diff_B']['A'], data['Xe_B']['lambda'], data['Xe_B']['A'])
-print(lam_diff_B, T_diff_B)
-s_diff = DatasetSpec(x=lam_diff_B, y=T_diff_B, label='diff_B / Xe_B (Absorbance)', marker='None', line='-') #np.log(1/(1-T_diff_B))
-
-#results_diff = lmfit(xdata=lam_diff_B, ydata=np.log10(1/T_diff_B), model="gaussian", initial_params={'b': 408, 'c': 1.0})
-
-
+lam = np.linspace(350, 715, 10000)
 plot_data(
-    [s_diff],
+    [DatasetSpec(x=lam_diff_B, y=1 - I_diff_B/I_Xe_B, label='diff_B / Xe_B', marker='None', line='-', fit_x=lam, fit_y=make_splrep(lam_diff_B, 1 - I_diff_B/I_Xe_B, s=0.5)(lam), fit_color='orange'),
+     DatasetSpec(x=lam_B, y=T_B, label='Ruby_B / Xe_B', marker='None', line='-')],
     title=f'Ruby Data: Difference',
     xlabel='Wavelength (nm)',
-    ylabel='Absorbance (A)',
-    filename=f'Plots/Difference.pdf',
+    ylabel='Transmittance T',
     height=15,
-    plot=False
+    plot=True
 )
-
-
-
-# Compute transmittance Ruby_B / Xe_B using interpolation onto Ruby_B wavelength grid
-
-
-lam_B, T_B = compute_ratio(data['Ruby_B']['lambda'], data['Ruby_B']['A'], data['Xe_B']['lambda'], data['Xe_B']['A'], eps=1e-6)
 
 initial_T_1 = 408.0
 initial_T_2 = 558.0
+
 mask_408 = (lam_B >= initial_T_1 - 15) & (lam_B <= initial_T_1 + 15)
 mask_560 = (lam_B >= initial_T_2 - 25) & (lam_B <= initial_T_2 + 25)
 
@@ -486,13 +558,6 @@ plot_data(
 # --------------------------------------------------------------------------------
 # --- Computing the narrow regions around 680nm and 720nm ----------------------
 # --------------------------------------------------------------------------------
-data['diff_N']['lambda'] -= 9.83 + 0.296
-data['Xe_N']['lambda'] -= 0.31
-
-
-
-
-    
     
 
 

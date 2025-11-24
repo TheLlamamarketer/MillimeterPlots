@@ -930,12 +930,13 @@ def plot_data(
             fig.savefig(_with_ext(filename, ".png"), bbox_inches="tight", dpi=max(200, dpi), transparent=transparent)
         if export_svg and filename:
             fig.savefig(_with_ext(filename, ".svg"), bbox_inches="tight", dpi=dpi, transparent=transparent)
-        if plot:
-            plt.show()
-        elif plot != "figure":
-            plt.close()
             
-        return fig, ax
+        if plot == 'figure':
+            return fig, ax
+        elif plot:
+            plt.show()
+        else:
+            plt.close()
 
         
 
@@ -1176,7 +1177,7 @@ def plot_color_seeds(
         ax.invert_yaxis()
         ax.set_frame_on(False)
         ax.grid(False)
-        #fig.savefig("color_seeds.png", bbox_inches="tight", transparent=True)
+        fig.savefig("color_seeds.png", bbox_inches="tight", transparent=False, dpi=150)
         plt.show()
 
 
@@ -1224,4 +1225,4 @@ def test_plotting():
 
 
 
-#plot_color_seeds((0,100), 5)
+#plot_color_seeds((0,100), 10)
