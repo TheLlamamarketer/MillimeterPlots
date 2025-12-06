@@ -128,7 +128,7 @@ def find_Hg_peaks(lam_Hg, A_Hg, Hg_lines):
             + (b**2) * slam_nom**2
             + 2 * lambda_peak * cov_ab)
         s_cal.append(np.sqrt(var))
-        
+
     data_hg = {
         'linelist': Hg_lines,
         'fitted':  lambda_peaks,
