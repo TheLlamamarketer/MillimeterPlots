@@ -1,4 +1,3 @@
-from calendar import c
 from itertools import combinations
 import math
 from pathlib import Path
@@ -135,5 +134,5 @@ ax.set_title("", pad=20)
 ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
 plt.tight_layout()
 plt.savefig(Path(__file__).with_name("STM_angles.pdf"), dpi=300, transparent=True)
-plt.close()
+plt.show()
 

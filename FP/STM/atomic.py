@@ -1,10 +1,15 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
 from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter, maximum_filter, label, center_of_mass
 from sklearn.neighbors import NearestNeighbors
+from scipy.interpolate import SmoothBivariateSpline
+from sklearn.mixture import GaussianMixture
+from itertools import combinations
+from Functions.help import print_round_val
 
 
-import matplotlib.pyplot as plt
 
 def load_wsxm_top(path, header_size=446):
     with open(path, "rb") as f:
@@ -25,7 +30,7 @@ def load_wsxm_top(path, header_size=446):
             elif "Z Amplitude" in line:
                 meta["z_amp"] = float(line.split(":")[1].split()[0])
 
-        # read the remaining binary data as float64 (little endian)
+        # read the remaining binary data as float64
         data = np.fromfile(f, dtype="<f8")
 
     rows, cols = meta["rows"], meta["cols"]
@@ -74,7 +79,7 @@ def fit_gaussians(image, positions_init, window_size=5):
         p0 = [amp0, x0_init, y0_init, sigma0, sigma0, offset0]
 
         try:
-            popt, pcov = curve_fit(
+            popt, _ = curve_fit(
                 gaussian_2d,
                 (X.ravel(), Y.ravel()),
                 region.ravel(),
@@ -84,7 +89,6 @@ def fit_gaussians(image, positions_init, window_size=5):
             # popt = [A, x0, y0, sx, sy, offset]
             fitted_params.append(popt)
         except RuntimeError:
-            # fit didn’t converge; skip this peak
             continue
 
     return np.array(fitted_params)
@@ -110,14 +114,12 @@ y_nm = np.linspace(0, y_size_nm, rows)
 img_smooth = gaussian_filter(image.astype(float), sigma=1.0)
 
 # local maxima in a small neighborhood
-neighborhood = 7  # roughly size of one atom in pixels
-local_max = (img_smooth == maximum_filter(img_smooth, size=neighborhood))
+local_max = (img_smooth == maximum_filter(img_smooth, size=7))
 
 # apply threshold to avoid noise peaks
-thr = np.percentile(img_smooth, 85)  # keep top 15% peaks
+thr = np.percentile(img_smooth, 84) 
 mask = local_max & (img_smooth > thr)
 
-# label connected components (each peak region)
 lbl, n = label(mask)
 print("found peaks:", n)
 
@@ -150,29 +152,68 @@ plt.title("STM height map from .top")
 plt.xlabel("x (nm)")
 plt.ylabel("y (nm)")
 plt.tight_layout()
-plt.show()
+
 
 
 # Plot 2: Residual
 fig2 = plt.figure(2, figsize=(6, 5))
 # Sum all fitted Gaussians in physical units
 X_px, Y_px = np.meshgrid(np.arange(cols), np.arange(rows))
-reconstructed_no_off = np.zeros_like(image, float)
+reconstructed = np.zeros_like(image, dtype=float)
+window_size = 4
+
 for A, x0, y0, sx, sy, c in fitted:
-    reconstructed_no_off += gaussian_2d((X_px, Y_px), A, x0, y0, sx, sy, 0.0)
+    x0_int = int(round(x0))
+    y0_int = int(round(y0))
+    
+    x_min = max(0, x0_int - window_size)
+    x_max = min(cols, x0_int + window_size + 1)
+    y_min = max(0, y0_int - window_size)
+    y_max = min(rows, y0_int + window_size + 1)
+    
+    X_region = X_px[y_min:y_max, x_min:x_max]
+    Y_region = Y_px[y_min:y_max, x_min:x_max]
+    
+    gaussian_region = gaussian_2d((X_region, Y_region), A, x0, y0, sx, sy, 0.0)
+    reconstructed[y_min:y_max, x_min:x_max] += gaussian_region
 
-# estimate global background as mean or median
-background = np.median(image - reconstructed_no_off)
+x0 = fitted[:, 1]
+y0 = fitted[:, 2]
+c  = fitted[:, 5]
 
-reconstructed = reconstructed_no_off + background
+bg_spline = SmoothBivariateSpline(x0, y0, c, kx=2, ky=2, s=1)
+background = bg_spline(np.arange(cols), np.arange(rows), grid=True).reshape(image.shape)
+
 residual = image - reconstructed
-im2 = plt.imshow(residual, origin="lower", cmap="seismic", extent=[0, x_size_nm, 0, y_size_nm], vmax=-residual.min(), vmin=residual.min())
+residual_masked = np.ma.masked_invalid(residual)
+
+im2 = plt.imshow(residual_masked, origin="lower", cmap="seismic", extent=[0, x_size_nm, 0, y_size_nm], vmax=-np.nanmin(residual), vmin=np.nanmin(residual))
 cb2 = plt.colorbar(im2, label=f"Height difference (pm)")
 plt.title("STM height map residual (original - fitted)")
 plt.xlabel("x (nm)")
 plt.ylabel("y (nm)")
 plt.tight_layout()
-plt.show()
+
+
+fig11 = plt.figure(11, figsize=(6, 4))
+plt.hist(fitted[:, 0], bins=50, color='purple', alpha=0.7)
+plt.xlabel("Amplitude (pm)")
+plt.ylabel("Frequency")
+plt.title("Histogram of fitted amplitudes")
+plt.tight_layout()
+
+
+
+fig10 = plt.figure(10, figsize=(6, 5))
+plt.plot(np.arange(cols), reconstructed[120, :], color='purple', label="Fitted positions")
+plt.plot(np.arange(cols), image[120, :], color='black', alpha=0.5, label="Original data")
+plt.title("Line cut comparison at y=120")
+plt.xlabel("x (nm)")
+plt.ylabel("z (pm)")
+plt.title("Fitted atomic positions")
+plt.legend()
+plt.tight_layout()
+
 
 A = fitted[:, 0]   
 mean_height = A.mean()
@@ -189,43 +230,115 @@ dy_nm = y_size_nm / rows
 nn = NearestNeighbors(n_neighbors=min(7, len(xy)), algorithm='auto').fit(xy)
 distances, indices = nn.kneighbors(xy)
 
-dist = distances[:, 1:]  # exclude self-distance at index 0
-idx     = indices[:, 1:]
+dist = distances[:, 1:]   # (N, k-1)
+idx  = indices[:, 1:]
 
 mean_nn_dist = dist.mean()
 std_nn_dist  = dist.std()
 
-# exclude vectors longer than 1.2 times the mean nearest-neighbor distance
-cutoff = 1.3 * mean_nn_dist
-mask = dist < cutoff
+cutoff = 1.05 * mean_nn_dist
+mask   = dist < cutoff
 
-# Keep the original `dist` for statistics but create a masked view for
-# downstream vector computations while preserving the (N, k) shape.
-dist_masked = np.where(mask, dist, np.nan)
+# --- masked distances and corresponding angles ---
+vecs = xy[idx] - xy[:, None, :]     # (N, k-1, 2)
+dist_masked   = np.where(mask, dist, np.nan)
+angles        = np.arctan2(vecs[..., 1], vecs[..., 0])
+angles_deg    = np.degrees(np.mod(angles, np.pi))
 
-# Create a safe index array for advanced indexing. Replace invalid indices
-# with a valid placeholder (0) to avoid selecting the last element (-1)
-# when indexing; we'll overwrite the corresponding vectors with NaN below.
-idx_safe = idx.copy()
-idx_safe[~mask] = 0
+# --- flatten with the same mask ---
+valid = ~np.isnan(dist_masked)
+angles_deg_flat = angles_deg[valid]
+dist_flat       = dist_masked[valid]
 
-# Compute vectors (shape (N, k, 2)) and then set invalid entries to NaN
-vecs = xy[idx_safe] - xy[:, None, :]
-vecs[~mask] = np.nan
+# --- GMM on angles ---
+X = angles_deg_flat.reshape(-1, 1)
+gmm = GaussianMixture(n_components=3, random_state=0).fit(X)
 
-# Compute angles but ignore NaNs when making distributions/plots
-angles = np.arctan2(vecs[..., 1], vecs[..., 0])  # [-π, π]
-angles_deg = np.degrees(np.mod(angles, np.pi))
+means  = gmm.means_.flatten()
+stds   = np.sqrt(gmm.covariances_.flatten())
+stderr = stds / np.sqrt(gmm.weights_ * len(X))
+
+order = np.argsort(means)
+means = means[order]
+stderr = stderr[order]
+
+labels_raw = gmm.predict(X)
+labels = np.zeros_like(labels_raw)
+for new_label, old_label in enumerate(order):
+    labels[labels_raw == old_label] = new_label
+
+
+angles_mean = [(means[i], stderr[i]) for i in range(3)] 
+
+print("GMM results:")
+for i in range(3):
+    mu, err = angles_mean[i]
+    print(f"family {i}: α = {mu:.3f}° ± {err:.3f}°")
+
+
+colors = ['tab:blue', 'tab:orange', 'tab:green']
 
 plt.figure(figsize=(6,4))
-# ignore NaNs when building the histogram
-angles_deg_flat = angles_deg[~np.isnan(angles_deg)].ravel()
 plt.hist(angles_deg_flat, bins=250, range=(0, 180), color='tab:blue', alpha=0.7)
+for i in range(3):
+    mu, err = angles_mean[i]
+    plt.axvline(mu, color='tab:orange', linestyle='--', label=f"μ = {mu:.2f}° ± {err:.2f}°")
 plt.xlabel("Angle (degrees)")
 plt.ylabel("Frequency")
 plt.title("Histogram of nearest neighbor angles")
 plt.tight_layout()
-plt.show()
+
+
+labels = gmm.predict(X)
+
+plt.figure(figsize=(6,4))
+
+for i in range(3):
+    mask_c = (labels == i)
+    plt.scatter(dist_flat[mask_c], angles_deg_flat[mask_c], s=5, label=f"family {i}")
+plt.xlabel("Distance to nearest neighbor (nm)")
+plt.ylabel("Angle (degrees)")
+plt.title("Nearest neighbor distances and angles colored by GMM family")
+plt.legend()
+plt.tight_layout()
+
+
+d = np.array([dist_flat[labels == i].mean() for i in range(3)])
+d0, d1, d2 = d
+
+phi0, err0 = angles_mean[0]
+phi1, err1 = angles_mean[1]
+phi2, err2 = angles_mean[2]
+
+b0 = d0 * np.array([np.cos(np.deg2rad(phi0)),
+                    np.sin(np.deg2rad(phi0))])
+b1 = d1 * np.array([np.cos(np.deg2rad(phi1)),
+                    np.sin(np.deg2rad(phi1))])
+b2 = d2 * np.array([np.cos(np.deg2rad(phi2)),
+                    np.sin(np.deg2rad(phi2))])
+
+B1 = np.column_stack([b0, b1]) 
+
+a = (d0 + d2) / 2
+a0 = a * np.array([1, 0])
+a1 = a * np.array([np.cos(np.deg2rad(60)),
+                   np.sin(np.deg2rad(60))])
+a2 = a * np.array([np.cos(np.deg2rad(120)),
+                   np.sin(np.deg2rad(120))])
+
+A1 = np.column_stack([a0, a1])
+
+F1 = B1 @ np.linalg.inv(A1)      # distortion
+T1 = np.linalg.inv(F1)           # unwarping transform
+
+
+print("Unwarping matrix T1:")
+print(T1)
+
+
+xy_corr = (T1 @ xy.T).T
+
+
 
 plt.figure(figsize=(6,4))
 plt.scatter(fitted_nm[:,1], fitted_nm[:,2], s=20, c="purple", label="Fitted positions")
@@ -244,8 +357,114 @@ for i in range(dist.shape[1]):
 plt.xlabel("x (nm)")
 plt.ylabel("y (nm)")
 plt.tight_layout()
+
+
+plt.figure(figsize=(6,4))
+plt.scatter(xy_corr[:,0], xy_corr[:,1], s=20, c="purple", label="Fitted positions")
+plt.xlabel("x (nm)")
+plt.ylabel("y (nm)")
+plt.tight_layout()
+
+# apply T1 to the original image
+
+X_flat = X_px.ravel()
+Y_flat = Y_px.ravel()
+
+XY_corr_flat = (T1 @ np.vstack([X_flat, Y_flat])).T
+X_corr = XY_corr_flat[:, 0].reshape(rows, cols)
+Y_corr = XY_corr_flat[:, 1].reshape(rows, cols)
+
+
+fig_corr = plt.figure(3, figsize=(6, 5))
+im_corr = plt.imshow(image, origin="lower", cmap="viridis", extent=[X_corr.min(), X_corr.max(), Y_corr.min(), Y_corr.max()])
+cb_corr = plt.colorbar(im_corr, label=f"Height (pm)")
+plt.title("Corrected STM height map")
+plt.xlabel("x (nm)")
+plt.ylabel("y (nm)")
+plt.tight_layout()
+
+
+
+pairwise_diffs = []
+for (i, (phi_i, err_i)), (j, (phi_j, err_j)) in combinations(enumerate(angles_mean), 2):
+    diff = (phi_i - phi_j) % 180
+    diff = min(diff, 180 - diff)  # Ensure the difference is within [0, 90]
+    diff_err = np.sqrt(err_i**2 + err_j**2)
+    pairwise_diffs.append((i, j, diff, diff_err))
+
+print("\nPairwise angle differences:")
+for i, j, diff, diff_err in pairwise_diffs:
+    print(f"{i}-{j}: {diff:6.2f} ± {diff_err:5.2f} °")
+
+angles_rad = np.deg2rad(np.array([angle for angle, err in angles_mean]))
+fig, ax = plt.subplots(subplot_kw={"projection": "polar"}, figsize=(6, 6))
+
+
+for i, (t, (phi, err)) in enumerate(zip(angles_rad, angles_mean)):
+    print(f"  Angle {i}: ${print_round_val(phi, err)}$ °")
+    color = colors[i % len(colors)]
+
+    ax.plot([t, t], [0, 1], lw=2, color=color, label=f"Angle {i}")
+    ax.plot([t + np.pi, t + np.pi], [0, 1], lw=2, color=color, alpha=0.5)
+    
+    ax.text(
+        t, 1.05,
+        f'$ {i}: {phi:1.2f}° $',
+        ha="center",
+        va="center",
+        fontsize=9,
+        rotation=0 if 80 <= np.rad2deg(t) <= 100 else (np.rad2deg(t) if np.rad2deg(t) <= 90 else np.rad2deg(t) - 180),
+        rotation_mode="anchor",
+        bbox=dict(boxstyle="round,pad=0.25", fc="white", alpha=0.7)
+    )
+
+    err_rad = np.deg2rad(err)
+    ax.fill_betweenx(
+        [0, 1],
+        t - err_rad,
+        t + err_rad,
+        color=color, alpha=0.3
+    )
+
+base_r = 0.3
+
+for k, (i, j, diff, diff_err) in enumerate(pairwise_diffs):
+    print(f" $ Arc {i} \\arrowright {j}: {print_round_val(diff, diff_err)} ° $")
+    t1 = angles_rad[i] % np.pi
+    t2 = angles_rad[j] % np.pi
+    
+
+    raw = (t2 - t1 + np.pi) % (2*np.pi) - np.pi
+
+    if raw >  np.pi/2:
+        raw -= np.pi
+    elif raw < -np.pi/2:
+        raw += np.pi
+        
+    diff_rad = np.deg2rad(diff)
+    d = np.sign(raw) * diff_rad
+
+    t_start = t1
+    t_end   = t1 + d
+
+    arc_t = np.linspace(t_start, t_end, 100)
+    r_arc = np.full_like(arc_t, base_r + 0.05 * k)
+
+    ax.plot(arc_t, r_arc, linestyle="-", linewidth=1, color="tab:purple")
+    ax.fill_between(arc_t, 0, r_arc, alpha=0.5, color="tab:purple")
+
+    t_mid = (t_start + t_end) / 2
+    r_mid = base_r + 0.05 * k
+    ax.text(t_mid, r_mid + 0.02, f"{i} → {j}: {diff:.1f}°", ha="center", va="bottom", fontsize=8, bbox=dict(boxstyle="round,pad=0.25", fc="white", alpha=0.7))
+
+ax.set_yticklabels([])
+ax.set_title("", pad=20)
+ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
+plt.tight_layout()
+plt.savefig(Path(__file__).with_name("STM_angles.pdf"), dpi=300, transparent=True)
 plt.show()
 
 
 
-print(f"Nearest-neighbour distance ≈ {mean_nn_dist:.3f} ± {std_nn_dist:.3f} nm")
+
+
