@@ -3,13 +3,17 @@ from scipy.optimize import curve_fit
 from scipy.special import expit
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
+from itertools import combinations
 from scipy.stats import norm
 from sklearn.mixture import GaussianMixture
 import glob
 import os
+import csv
 
 
-
+# ======================================================================
+# I/O: WSxM .top loader
+# ======================================================================
 
 def load_wsxm_top(path, header_size=446):
     """
@@ -23,6 +27,7 @@ def load_wsxm_top(path, header_size=446):
     meta  : dict  (keys: 'rows', 'cols', 'x_amp', 'y_amp', 'z_amp' if available)
     header_text : str
     """
+    
     with open(path, "rb") as f:
         data_bytes = f.read()
 
@@ -138,44 +143,56 @@ def load_wsxm_top(path, header_size=446):
     return image, meta, header_text
 
 
+# ======================================================================
+# Model functions and fitting utilities
+# ======================================================================
+
 def logistic(x, z0, h, x0, k):
     return z0 + h * expit(k * (x - x0))
 
-def fit_line_profiles(image, min_points = 10, min_step_height_nm = None, grad_sigma = 2, window_half_width = 30, max_k = 5.0, rms_rel_tol = 0.3, rms_abs_tol = 0.2, averaging_radius:int = 0):
-    
-    """
-        Fit each vertical line profile in the image to a logistic step function.
-        
-        Parameters
-        ----------
-        image : 2D ndarray
-            Height map in nm.
-        min_points : int
-            Minimum number of valid (non-NaN) points to attempt fit.
-        min_step_height_nm : float or None
-            Minimum estimated step height to attempt fit.
-        grad_sigma : float
-            Gaussian smoothing sigma for gradient estimation.
-        window_half_width : int
-            Half-width of fitting window around estimated step.
-        max_k : float
-            Maximum absolute value of logistic steepness parameter.
-        rms_rel_tol : float or None
-            Relative RMS tolerance for fit acceptance (relative to |h|).
-        rms_abs_tol : float or None
-            Absolute RMS tolerance for fit acceptance.
-        averaging_radius : int
-            Radius (in columns) to average for each line profile (0 = no averaging).
 
-        Returns
-        -------
-        fit_params : list
-            List of (popt, perr) per column, or None if fit failed.
-            popt = [z0, h, x0, k]
-            perr = 1σ uncertainties from covariance (np.nan where undefined).
+def fit_line_profiles(
+    image,
+    min_points=10,
+    min_step_height_nm=None,
+    grad_sigma=2,
+    window_half_width=30,
+    max_k=5.0,
+    rms_rel_tol=0.3,
+    rms_abs_tol=0.2,
+    averaging_radius=0,
+):
     """
-    
-        
+    Fit each vertical line profile in the image to a logistic step function.
+
+    Parameters
+    ----------
+    image : 2D ndarray
+        Height map in nm.
+    min_points : int
+        Minimum number of valid (non-NaN) points to attempt fit.
+    min_step_height_nm : float or None
+        Minimum estimated step height to attempt fit.
+    grad_sigma : float
+        Gaussian smoothing sigma for gradient estimation.
+    window_half_width : int
+        Half-width of fitting window around estimated step.
+    max_k : float
+        Maximum absolute value of logistic steepness parameter.
+    rms_rel_tol : float or None
+        Relative RMS tolerance for fit acceptance (relative to |h|).
+    rms_abs_tol : float or None
+        Absolute RMS tolerance for fit acceptance.
+    averaging_radius : int
+        Radius (in columns) to average for each line profile (0 = no averaging).
+
+    Returns
+    -------
+    fit_params : list
+        List of (popt, perr) per column, or None if fit failed.
+        popt = [z0, h, x0, k]
+        perr = 1σ uncertainties from covariance (np.nan where undefined).
+    """
     rows, cols = image.shape
     row_idx = np.arange(rows)
 
@@ -310,29 +327,33 @@ def fit_best_gmm(data: np.ndarray, max_components: int = 7, min_distance: float 
             n_init=8
         )
         gmm.fit(X)
-        
+
         # Check minimum distance between component means
         means = gmm.means_.ravel()
         if k > 1:
             min_dist = np.min(np.diff(np.sort(means)))
             if min_dist < min_distance:
                 continue  # Skip this model if components are too close
-        
+
         models.append(gmm)
         bics.append(gmm.bic(X))
-    
+
     if not bics:
         # Fallback to k=1 if no valid models found
         gmm = GaussianMixture(n_components=1, random_state=0, n_init=8)
         gmm.fit(X)
         return gmm, 1, np.array([gmm.bic(X)])
-    
+
     bics = np.array(bics)
     best_idx = int(np.argmin(bics))
     best_k = best_idx + 1
     best_gmm = models[best_idx]
     return best_gmm, best_k, bics
 
+
+# ======================================================================
+# Main analysis for a single file
+# ======================================================================
 
 def analyze_top_file(
     top_file: str,
@@ -342,17 +363,12 @@ def analyze_top_file(
     verbose: bool = True,
 ):
     """
-    Full pipeline for a single STM .top file:
-    - Load and convert to nm.
-    - Segment into two height regions with GMM and plane-fit each.
-    - Fit logistic steps column-wise.
-    - Compute step height statistics and GMM over step heights.
-    - Optionally make diagnostic and summary plots.
+    Full pipeline for a single STM .top file.
 
     Returns
     -------
     results : dict
-        Contains step-height statistics, GMM parameters, etc.
+        Contains step-height estimates by different methods and their errors.
     """
 
     # ------------------------------------------------------------------
@@ -376,9 +392,8 @@ def analyze_top_file(
     vmin = np.nanmin(image)
     vmax = np.nanmax(image)
 
-
     # ------------------------------------------------------------------
-    # Segment into 2 regions with GMM on Z and plane-fit each
+    # Segment into 2 regions with GMM on Z
     # ------------------------------------------------------------------
     valid_mask = ~np.isnan(Z)
     Zv = Z[valid_mask].reshape(-1, 1)
@@ -389,18 +404,17 @@ def analyze_top_file(
     labels = gmm2.predict(Zv)
 
     # --- parameters of the 2-Gaussian mixture (on height Z) ---
-    means_z   = gmm2.means_.ravel()                 # shape (2,)
-    vars_z    = gmm2.covariances_.reshape(-1)       # shape (2,) because it's 1D
+    means_z   = gmm2.means_.ravel()
+    vars_z    = gmm2.covariances_.reshape(-1)
     sigmas_z  = np.sqrt(vars_z)
-    weights_z = gmm2.weights_.ravel()               # shape (2,)
+    weights_z = gmm2.weights_.ravel()
 
     # sort components by mean: comp 1 = lower plateau, comp 2 = higher plateau
     order = np.argsort(means_z)
     means_z   = means_z[order]
     sigmas_z  = sigmas_z[order]
     weights_z = weights_z[order]
-
-    low_label,  high_label  = order[0], order[1]
+    low_label, high_label = order[0], order[1]
 
     # map labels back into image
     label_img = -np.ones_like(Z, dtype=int)
@@ -409,21 +423,51 @@ def analyze_top_file(
     mask_low  = label_img == low_label
     mask_high = label_img == high_label
 
-    # --- plane fit on each region ---
-    a_low,  b_low,  c_low  = fit_plane(Z, X, Y, mask_low)
-    a_high, b_high, c_high = fit_plane(Z, X, Y, mask_high)
 
-    plane_low  = a_low  * X + b_low  * Y + c_low
-    plane_high = a_high * X + b_high * Y + c_high
+    # ------------------------------------------------------------------
+    # Plateau-based method (reference plane from low plateau only)
+    # ------------------------------------------------------------------
+    # Fit plane only to the low terrace, level everything with that.
+    a_ref, b_ref, c_ref = fit_plane(Z, X, Y, mask_low)
+    plane_ref = a_ref * X + b_ref * Y + c_ref
+    Z_flat = Z - plane_ref
 
-    image_corr = np.full_like(image, np.nan)
-    image_corr[mask_low]  = image[mask_low]  - plane_low[mask_low]
-    image_corr[mask_high] = image[mask_high] - plane_high[mask_high]
+    z_low  = Z_flat[mask_low]
+    z_high = Z_flat[mask_high]
+    z_low  = z_low[np.isfinite(z_low)]
+    z_high = z_high[np.isfinite(z_high)]
 
-    # plateau heights after plane removal
-    h_low  = np.nanmedian(image_corr[mask_low])
-    h_high = np.nanmedian(image_corr[mask_high])
-    step_height_plane = h_high - h_low  
+    def robust_core(vals):
+        if vals.size == 0:
+            return vals
+        med = np.median(vals)
+        mad = 1.4826 * np.median(np.abs(vals - med))
+        if not np.isfinite(mad) or mad == 0:
+            return vals
+        return vals[np.abs(vals - med) < 3 * mad]
+
+    z_low_core  = robust_core(z_low)
+    z_high_core = robust_core(z_high)
+    if z_low_core.size == 0:
+        z_low_core = z_low
+    if z_high_core.size == 0:
+        z_high_core = z_high
+
+    if z_low_core.size > 0 and z_high_core.size > 0:
+        mean_low  = z_low_core.mean()
+        mean_high = z_high_core.mean()
+        var_low   = z_low_core.var(ddof=1) if z_low_core.size > 1 else 0.0
+        var_high  = z_high_core.var(ddof=1) if z_high_core.size > 1 else 0.0
+        step_plateau_mean = mean_high - mean_low
+        step_plateau_mean_err = np.sqrt(
+            (var_low / max(1, z_low_core.size)) +
+            (var_high / max(1, z_high_core.size))
+        )
+        step_plateau_median = np.median(z_high_core) - np.median(z_low_core)
+    else:
+        step_plateau_mean = np.nan
+        step_plateau_mean_err = np.nan
+        step_plateau_median = np.nan
 
     # ------------------------------------------------------------------
     # Segmentation overlay for visualization
@@ -441,10 +485,9 @@ def analyze_top_file(
         plt.tight_layout()
 
     # ------------------------------------------------------------------
-    # Raw height map & histogram + 2-Gaussian GMM overlay
+    # Raw height map & histogram (no fit overlay here to avoid clutter)
     # ------------------------------------------------------------------
     if show_debug_plots:
-        # height map
         fig = plt.figure(figsize=(6, 5))
         im = plt.imshow(
             image, origin="lower", cmap="viridis",
@@ -458,16 +501,15 @@ def analyze_top_file(
         plt.tight_layout()
 
         heights_flat = Z[valid_mask]
-
         fig = plt.figure(figsize=(6, 5))
         plt.hist(heights_flat, bins=100, density=True,
-                color='blue', alpha=0.4, label="Data")
+                 color='blue', alpha=0.4, label="Data")
         plt.xlabel("Height (nm)")
         plt.ylabel("Probability density")
-        plt.title(f"{top_file}: height histogram + 2-Gaussian GMM")
+        plt.title(f"{top_file}: height histogram")
         plt.legend(fontsize=8)
         plt.tight_layout()
-        
+
     # ------------------------------------------------------------------
     # Logistic fits per column
     # ------------------------------------------------------------------
@@ -480,10 +522,10 @@ def analyze_top_file(
         max_k=3.0,
         averaging_radius=averaging_radius,
     )
-    
+
     fit_params = [p[0] if p is not None else None for p in fit]
     fit_errors = [p[1] if p is not None else None for p in fit]
-    
+
     # Build fitted image
     fitted_image = np.full((rows, cols), np.nan)
     for col, params in enumerate(fit_params):
@@ -493,11 +535,10 @@ def analyze_top_file(
             fitted_image[:, col] = logistic(np.arange(rows), *params)
         except Exception:
             fitted_image[:, col] = np.nan
-            
 
     residual = image - fitted_image
     max_res = np.nanmax(np.abs(residual))
-            
+
     if show_debug_plots:
         # fitted height map
         fig = plt.figure(figsize=(6, 5))
@@ -543,7 +584,7 @@ def analyze_top_file(
             z_vals = image[:, example_col][valid_mask_col]
             plt.plot(y_vals_nm, z_vals, 'k.', label='data')
             if fit_params[example_col] is not None:
-                fit_vals = fitted_image[:, example_col] * 1.0
+                fit_vals = fitted_image[:, example_col]
                 plt.plot(
                     np.arange(rows) * (y_size_nm / rows),
                     fit_vals, 'r-', label='fit'
@@ -555,7 +596,9 @@ def analyze_top_file(
 
         plt.tight_layout()
 
-
+    # ------------------------------------------------------------------
+    # Column step heights from logistic fits
+    # ------------------------------------------------------------------
     heights = np.full(cols, np.nan)
     heights_err = np.full(cols, np.nan)
 
@@ -568,47 +611,59 @@ def analyze_top_file(
 
     valid_height_mask = np.isfinite(heights)
     heights_all = heights[valid_height_mask]
-    
-    
 
-
-    # ------------------------------------------------------------------
-    # Histogram of step heights + GMM
-    # ------------------------------------------------------------------
     if heights_all.size == 0:
         raise RuntimeError(f"[{top_file}] No valid step heights were fitted")
 
-    
     # robust pre-cleaning via MAD
-    med = np.median(heights_all)
-    mad = np.median(np.abs(heights_all - med))
-    mad_sigma = 1.4826 * mad
-
-    mask_mad = np.abs(heights_all - med) < 3 * mad_sigma
-    h_good = heights_all[mask_mad]
-
-    mean_simple = h_good.mean()
-    err_good = heights_err[valid_height_mask][mask_mad]
-    good_for_weight = np.isfinite(err_good) & (err_good > 0)
-    if np.any(good_for_weight):
-        w = 1.0 / err_good[good_for_weight] ** 2
-        mean_simple_weighted = np.average(h_good[good_for_weight], weights=w)
+    med_h = np.median(heights_all)
+    mad_h = np.median(np.abs(heights_all - med_h))
+    mad_sigma_h = 1.4826 * mad_h
+    if np.isfinite(mad_sigma_h) and mad_sigma_h > 0:
+        mask_h_core = np.abs(heights_all - med_h) < 3 * mad_sigma_h
     else:
-        mean_simple_weighted = np.nan
-    std_simple = h_good.std(ddof=1)
-    stderr_simple = std_simple / np.sqrt(h_good.size)
-    
-    
-    #  simple Gaussian fit plot
+        mask_h_core = np.ones_like(heights_all, dtype=bool)
+
+    h_good = heights_all[mask_h_core]
+    err_good = heights_err[valid_height_mask][mask_h_core]
+    n_good = h_good.size
+
+    # Column-logistic mean + error (scatter-based)
+    if n_good > 0:
+        step_col_mean = h_good.mean()
+    else:
+        step_col_mean = np.nan
+
+    if n_good > 1:
+        std_col = h_good.std(ddof=1)
+        step_col_mean_err = std_col / np.sqrt(n_good)
+    else:
+        std_col = np.nan
+        step_col_mean_err = np.nan
+
+    # Weighted mean using column fit uncertainties
+    good_err_mask = np.isfinite(err_good) & (err_good > 0)
+    if np.any(good_err_mask):
+        w = 1.0 / (err_good[good_err_mask] ** 2)
+        sumw = np.sum(w)
+        step_col_wmean = np.sum(w * h_good[good_err_mask]) / sumw
+        step_col_wmean_err = np.sqrt(1.0 / sumw)
+    else:
+        step_col_wmean = np.nan
+        step_col_wmean_err = np.nan
+
+    # ------------------------------------------------------------------
+    # Histogram of column step heights + GMM (per-file internal structure)
+    # ------------------------------------------------------------------
     if show_debug_plots:
         fig = plt.figure(figsize=(6, 4))
         plt.hist(heights_all, bins=90, color='blue', alpha=0.4, density=True, label='All heights')
         plt.hist(h_good, bins=40, color='red', alpha=0.7, density=True, label='After 3·MAD cut')
 
-        mu, sigma = norm.fit(h_good)
+        mu_fit, sigma_fit = norm.fit(h_good)
         x = np.linspace(h_good.min(), h_good.max(), 200)
-        plt.plot(x, norm.pdf(x, mu, sigma), 'k-', linewidth=2,
-                 label=f'Gaussian fit: μ={mu:.3f}, σ={sigma:.3f}')
+        plt.plot(x, norm.pdf(x, mu_fit, sigma_fit), 'k-', linewidth=2,
+                 label=f'Gaussian fit: μ={mu_fit:.3f}, σ={sigma_fit:.3f}')
 
         plt.xlabel("Fitted step height (nm)")
         plt.ylabel("Probability density")
@@ -616,24 +671,18 @@ def analyze_top_file(
         plt.legend(fontsize=8)
         plt.tight_layout()
 
-
-
-
+    # GMM on h_good (to infer layer spacing)
     gmm, best_k, bics = fit_best_gmm(h_good, max_components=7)
-
-
     means = gmm.means_.ravel()
     vars_ = gmm.covariances_.ravel()
     sigmas = np.sqrt(vars_)
     weights = gmm.weights_.ravel()
 
-    # sort by mean
     order = np.argsort(means)
     means = means[order]
     sigmas = sigmas[order]
     weights = weights[order]
-    
-    # estimate fundamental spacing d from significant components
+
     weight_threshold = 0.05
     sig_idx = weights > weight_threshold
     means_sig = means[sig_idx]
@@ -643,9 +692,6 @@ def analyze_top_file(
         diffs = np.diff(means_sig)
         d_est = np.median(diffs)
 
-
-
-     # summary mixture plot (good "heights plot" to keep when running many files)
     if show_summary_plots:
         fig = plt.figure(figsize=(6, 4))
         plt.hist(h_good, bins=40, density=True, alpha=0.4, label="Data (cleaned)")
@@ -665,91 +711,396 @@ def analyze_top_file(
         plt.title(f"{top_file}: step heights + Gaussian mixture")
         plt.legend(fontsize=8)
         plt.tight_layout()
-    
-    
-    # plot step heights vs column
+
+    # ------------------------------------------------------------------
+    # Plot step heights vs column
+    # ------------------------------------------------------------------
     if show_summary_plots or show_debug_plots:
         fig = plt.figure(figsize=(6, 4))
         x_positions = x_size_nm / cols * np.arange(cols)
-        # for plotting errors, just mask NaNs
-        err_mask = valid_height_mask & np.isfinite(heights_err)
-        yerr = np.where(err_mask, heights_err, np.nan)
 
         plt.errorbar(
             x_positions[valid_height_mask],
             heights_all,
-            yerr=yerr[valid_height_mask],
+            yerr=heights_err[valid_height_mask],
             fmt='o', color='blue', alpha=0.7,
-            elinewidth=1, capsize=2
+            elinewidth=1, capsize=2,
+            label="column steps"
         )
-        
-        # weighted mean (only where errors are positive and finite)
-        mean_weighted = np.nan
-        good_for_weight =  np.isfinite(heights_err) & (heights_err > 0)
-        if np.any(good_for_weight):
-            w = 1.0 / heights_err[good_for_weight] ** 2
-            mean_weighted = np.average(heights_all[good_for_weight], weights=w)
-        else:
-            mean_weighted = mean_simple
-            
-        plt.axhline(
-            y=mean_weighted,
-            color='red', linestyle='--',
-            label=f'h_{{all}} = {mean_weighted:.4f} nm'
-        )
-        plt.axhline(
-            y=mean_simple_weighted,
-            color='green', linestyle=':',
-            label=f'h_{{significant}} = {mean_simple_weighted:.4f} nm'
-        )
-        
-        
-        
+
+        if np.isfinite(step_col_mean):
+            plt.axhline(
+                step_col_mean,
+                color='red', linestyle='--',
+                label=f'mean = {step_col_mean:.4f} nm'
+            )
+        if np.isfinite(step_col_wmean):
+            plt.axhline(
+                step_col_wmean,
+                color='green', linestyle=':',
+                label=f'w-mean = {step_col_wmean:.4f} nm'
+            )
+
         plt.legend()
         plt.xlabel("x (nm)")
         plt.ylabel("Fitted step height (nm)")
         plt.title(f"{top_file}: fitted step heights vs x")
         plt.tight_layout()
-    
-    
+
+    # ------------------------------------------------------------------
+    # Text summary
+    # ------------------------------------------------------------------
     if verbose:
         print()
         print(f"=== {top_file} ===")
-        print(f"Image size: {rows}*{cols} px, {x_size_nm:.1f} * {y_size_nm:.1f} nm")
-        print(f"Plane-fit step height (low→high region): {step_height_plane:.4f} nm")
-        print(f"Logistic step heights after 3·MAD cut: N = {h_good.size}")
-        print(f"   h = {mean_simple:.4f} ± {stderr_simple:.4f} nm (simple mean)")
-        if np.isfinite(mean_weighted):
-            print(f"   h_{{weighted}} = {mean_weighted:.4f} nm (weighted mean)")
-        print(f"GMM best K = {best_k}")
+        print(f"Image size: {rows}×{cols} px, {x_size_nm:.1f} × {y_size_nm:.1f} nm")
+
+        print("Plateau-based (global plane):")
+        print(f"  N_low = {z_low_core.size}, N_high = {z_high_core.size}")
+        print(f"  step_mean = {step_plateau_mean:.4f} ± {step_plateau_mean_err:.4f} nm")
+        if np.isfinite(step_plateau_mean):
+            print(f"              ≈ {step_plateau_mean/0.335:.3f} layers")
+        print(f"  step_median ≈ {step_plateau_median:.4f} nm")
+
+        print("Column-logistic (after 3·MAD cut):")
+        print(f"  N_good columns = {n_good}")
+        print(f"  step_col_mean       = {step_col_mean:.4f} ± {step_col_mean_err:.4f} nm")
+        print(f"  step_col_weighted   = {step_col_wmean:.4f} ± {step_col_wmean_err:.4f} nm")
+
+        print(f"GMM on column steps: best K = {best_k}")
         for i, (m, s, w) in enumerate(zip(means, sigmas, weights), start=1):
             print(f"  Comp #{i}: μ = {m:.4f} nm, σ = {s:.4f} nm, weight = {w:.3f}")
         if not np.isnan(d_est):
-            print(f"Estimated layer spacing from GMM: d ≈ {d_est:.4f} nm "
-                  f"(d / 0.335 nm ≈ {d_est / 0.335:.3f})")
-        
+            print(f"  inferred layer spacing d ≈ {d_est:.4f} nm "
+                  f"(d / 0.335 ≈ {d_est / 0.335:.3f})")
 
-    # show every plot at the same time
     if show_debug_plots or show_summary_plots:
         plt.show()
-    else:
-        plt.close()
+
+    # ------------------------------------------------------------------
+    # Collect results to return
+    # ------------------------------------------------------------------
+    results = {
+        "file": top_file,
+        "step_plateau_global_mean_nm": step_plateau_mean,
+        "step_plateau_global_mean_err_nm": step_plateau_mean_err,
+        "step_plateau_global_median_nm": step_plateau_median,
+        "step_column_mean_nm": step_col_mean,
+        "step_column_mean_err_nm": step_col_mean_err,
+        "step_column_weighted_mean_nm": step_col_wmean,
+        "step_column_weighted_mean_err_nm": step_col_wmean_err,
+        "n_plateau_low": z_low_core.size,
+        "n_plateau_high": z_high_core.size,
+        "n_good_columns": n_good,
+        "d_layer_spacing_nm": d_est,
+        "all_heights": h_good,  # All individual heights from this file
+        "all_heights_err": err_good,  # Corresponding errors
+    }
+    return results
 
 
-# only run when the file is executed directly, so that when something is imported no code is run
+# ======================================================================
+# Batch processing and combined plots
+# ======================================================================
+
 if __name__ == "__main__":
-    
-    steps_dir = "FP/STM/steps"
-    top_files = sorted(glob.glob(os.path.join(steps_dir, "*.top")))
 
-    for f in top_files:
+    steps_dir   = "FP/STM/steps"
+    cache_file  = os.path.join(steps_dir, "batch_results_cache.csv")
+    top_files   = sorted(glob.glob(os.path.join(steps_dir, "*.top")))
+
+    # ------------------------------------------------------------------
+    # Simple switch: cache is used ONLY if you explicitly set this True.
+    # ------------------------------------------------------------------
+    USE_CACHE = False 
+
+    use_cache = False
+    if USE_CACHE and os.path.exists(cache_file):
+        cache_mtime = os.path.getmtime(cache_file)
+        top_mtimes  = [os.path.getmtime(f) for f in top_files]
+        if top_mtimes and max(top_mtimes) < cache_mtime:
+            use_cache = True
+            print(f"Loading cached results from {cache_file}")
+
+    if use_cache:
+        # --------------------------------------------------------------
+        # Load scalar results from CSV cache
+        # (per-column heights are not cached, so "all_heights" will be NaN)
+        # --------------------------------------------------------------
+        all_results = []
+        with open(cache_file, 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                result = {"file": row["file"]}
+                for key in row:
+                    if key == "file":
+                        continue
+                    try:
+                        result[key] = float(row[key])
+                    except ValueError:
+                        result[key] = np.nan
+                all_results.append(result)
+        print(f"Loaded {len(all_results)} cached results")
+    else:
+        # --------------------------------------------------------------
+        # Fresh analysis of all .top files
+        # --------------------------------------------------------------
+        print("Running analysis on all files...")
+        all_results = []
+        for f in top_files:
+            try:
+                res = analyze_top_file(
+                    f,
+                    show_debug_plots=False,
+                    show_summary_plots=False,
+                    averaging_radius=1,
+                    verbose=True,
+                )
+                all_results.append(res)
+            except Exception as e:
+                print(f"Error processing {f}: {e}")
+
+        # Save scalar results to CSV cache (arrays are omitted automatically)
+        if all_results:
+            print(f"Saving results to {cache_file}")
+            # keep only scalar keys for the CSV
+            scalar_keys = [
+                k for k in all_results[0].keys()
+                if not isinstance(all_results[0][k], np.ndarray)
+            ]
+            with open(cache_file, 'w', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=scalar_keys)
+                writer.writeheader()
+                for res in all_results:
+                    row = {k: res[k] for k in scalar_keys}
+                    writer.writerow(row)
+
+    # ----- Combined analysis over many images -----
+    if all_results:
+        files = [os.path.basename(r["file"]) for r in all_results]
+        idx   = np.arange(len(files))
+
+        def arr(key):
+            return np.array([r.get(key, np.nan) for r in all_results], dtype=float)
+
+        # Plateau-based method (kept for completeness but not used in plots)
+        # pg_mean   = arr("step_plateau_global_mean_nm")
+        # pg_mean_e = arr("step_plateau_global_mean_err_nm")
+
+        col_mean    = arr("step_column_mean_nm")
+        col_mean_e  = arr("step_column_mean_err_nm")
+        col_wmean   = arr("step_column_weighted_mean_nm")
+        col_wmean_e = arr("step_column_weighted_mean_err_nm")
+
+        # ------------------------------------------------------------------
+        # Collect ALL individual column heights (extra distribution plot)
+        # ------------------------------------------------------------------
+        all_heights_combined     = []
+        all_heights_err_combined = []
+        heights_per_image        = []   # list of arrays, one per file
+
+        for r in all_results:
+            h_arr = r.get("all_heights", None)
+            e_arr = r.get("all_heights_err", None)
+            if isinstance(h_arr, np.ndarray) and h_arr.size:
+                heights_per_image.append(h_arr)
+                all_heights_combined.extend(h_arr.flatten())
+                if isinstance(e_arr, np.ndarray) and e_arr.size:
+                    all_heights_err_combined.extend(e_arr.flatten())
+
+        all_heights_combined     = np.array(all_heights_combined)
+        all_heights_err_combined = np.array(all_heights_err_combined)
+
+        h0_lit = 0.335  # literature single layer height (nm)
+
+        # Helper: numeric summary you can quote in the text
+        def global_summary(name, heights, heights_e=None):
+            mask = np.isfinite(heights)
+            h = heights[mask]
+            if h.size == 0:
+                return
+
+            mean = h.mean()
+            std  = h.std(ddof=1) if h.size > 1 else np.nan
+            stderr = std / np.sqrt(h.size) if h.size > 1 else np.nan
+            print(f"{name}: unweighted mean = {mean:.4f} ± {stderr:.4f} nm  (N = {h.size})")
+
+            if heights_e is not None:
+                mask_w = mask & np.isfinite(heights_e) & (heights_e > 0)
+                if np.any(mask_w):
+                    h_w = heights[mask_w]
+                    e_w = heights_e[mask_w]
+                    w   = 1.0 / (e_w ** 2)
+                    h_bar = np.sum(w * h_w) / np.sum(w)
+                    h_err = np.sqrt(1.0 / np.sum(w))
+                    print(f"    weighted by per-image σ: {h_bar:.4f} ± {h_err:.4f} nm")
+
+        methods = [
+            ("Column-logistic mean",          col_mean,  col_mean_e),
+            ("Column-logistic weighted mean", col_wmean, col_wmean_e),
+        ]
+
+        # ------------------------------------------------------------------
+        # Histograms of per-image means vs. all individual heights
+        # ------------------------------------------------------------------
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+        # Left: per-image means
+        ax = axes[0]
+        h_plot = col_mean[np.isfinite(col_mean)]
+        ax.hist(h_plot, bins=70, alpha=0.7, color='blue', label='Per-image means')
+        ax.set_xlabel("Step height (nm)")
+        ax.set_ylabel("Count")
+        ax.set_title("Per-image column-logistic means")
+
+        if h_plot.size:
+            h_max = float(h_plot.max())
+            n_max = int(np.ceil(h_max / h0_lit))
+            for n in range(1, n_max + 1):
+                ax.axvline(n * h0_lit, linestyle=":", linewidth=0.8, alpha=0.5)
+        ax.legend()
+
+        # Right: all individual heights (combined distribution)
+        ax = axes[1]
+        if all_heights_combined.size > 0:
+            ax.hist(all_heights_combined, bins=100, alpha=0.7, color='red',
+                    label='All column heights')
+            ax.set_xlabel("Step height (nm)")
+            ax.set_ylabel("Count")
+            ax.set_title(f"All fitted column heights (N={all_heights_combined.size})")
+            h_max = float(np.nanmax(all_heights_combined))
+            n_max = int(np.ceil(h_max / h0_lit))
+            for n in range(1, n_max + 1):
+                ax.axvline(n * h0_lit, linestyle=":", linewidth=0.8, alpha=0.5)
+            ax.legend()
+
+        fig.tight_layout()
+
+        # ------------------------------------------------------------------
+        # EXTRA: per-image distributions of all column heights (boxplot)
+        # ------------------------------------------------------------------
+        if heights_per_image:
+            fig = plt.figure(figsize=(10, 5))
+            ax = fig.add_subplot(111)
+
+            # boxplot expects a list of 1D arrays
+            bp = ax.boxplot(heights_per_image,
+                            positions=np.arange(len(heights_per_image)),
+                            showfliers=True)
+
+            ax.set_xticks(np.arange(len(files)))
+            ax.set_xticklabels(files, rotation=45, ha="right")
+            ax.set_ylabel("Step height (nm)")
+            ax.set_title("Distribution of all fitted step heights per image")
+
+            # guideline lines at n·h0
+            try:
+                h_max = float(np.nanmax(all_heights_combined))
+                if np.isfinite(h_max) and h_max > 0:
+                    n_max = int(np.ceil(h_max / h0_lit))
+                    for n in range(1, n_max + 1):
+                        ax.axhline(n * h0_lit, linestyle=":", linewidth=0.8, color="gray")
+            except Exception:
+                pass
+
+            fig.tight_layout()
+
+        # ------------------------------------------------------------------
+        # Step height vs. image (means + weighted means)
+        # ------------------------------------------------------------------
+        fig = plt.figure(figsize=(9, 5))
+
+        if np.any(np.isfinite(col_mean)):
+            plt.errorbar(idx, col_mean, yerr=col_mean_e,
+                         fmt="s-", label="Column-logistic mean")
+
+        if np.any(np.isfinite(col_wmean)):
+            plt.errorbar(idx, col_wmean, yerr=col_wmean_e,
+                         fmt="^-", label="Column-logistic weighted mean")
+
+        plt.xticks(idx, files, rotation=45, ha="right")
+        plt.xlabel("Image index / file")
+        plt.ylabel("Step height (nm)")
+        plt.title("Step heights per image (column-logistic methods)")
+        plt.legend()
+        plt.tight_layout()
+
+        # ------------------------------------------------------------------
+        # Same heights, sorted: spread + outliers
+        # ------------------------------------------------------------------
+        fig = plt.figure(figsize=(6, 5))
+        order = np.argsort(col_mean)
+        plt.errorbar(
+            np.arange(len(order)), col_mean[order],
+            yerr=col_mean_e[order],
+            fmt="o", alpha=0.7, linestyle="None",
+        )
+
         try:
-            analyze_top_file(
-                f,
-                show_debug_plots=True,
-                show_summary_plots=True,
-                averaging_radius=1,
-                verbose=True,
+            h_max = float(np.nanmax(col_mean[order]))
+            if np.isfinite(h_max) and h_max > 0:
+                n_max = int(np.ceil(h_max / h0_lit))
+                for n in range(1, n_max + 1):
+                    plt.axhline(
+                        n * h0_lit,
+                        linestyle=":", linewidth=0.8, color="gray",
+                        label=(f"{h0_lit:.3f} nm multiples" if n == 1 else "_nolegend_")
+                    )
+        except Exception:
+            pass
+
+        plt.xlabel("Index (sorted by step height)")
+        plt.ylabel("Step height (nm)")
+        plt.title("Column-logistic mean (sorted)")
+        plt.tight_layout()
+
+        # ------------------------------------------------------------------
+        # Consistency with integer multiples of h0 for the two methods
+        # ------------------------------------------------------------------
+        for (method_name, heights, heights_e) in methods:
+            fig = plt.figure(figsize=(10, 4))
+            fig.suptitle(method_name)
+
+            h = heights[np.isfinite(heights)]
+            e = heights_e[np.isfinite(heights_e)]
+            if h.size == 0:
+                continue
+
+            ratio  = h / h0_lit
+            n_near = np.rint(ratio).astype(int)
+            delta  = ratio - n_near  # dimensionless deviation
+
+            ax1 = plt.subplot(1, 2, 1)
+            ax1.hist(delta, bins=20)
+            ax1.set_xlabel(r"$h/h_0 - \mathrm{round}(h/h_0)$")
+            ax1.set_ylabel("Count")
+            ax1.set_title("Distance to nearest integer multiple")
+            ax1.axvline(0.0, color="k", linewidth=0.8)
+
+            ax2 = plt.subplot(1, 2, 2)
+            ax2.errorbar(n_near, h, yerr=e, fmt="o", linestyle="None")
+            x_line = np.array([0, n_near.max() + 1])
+            ax2.plot(x_line, x_line * h0_lit, "--")
+            ax2.set_xlabel("Nearest integer $n$")
+            ax2.set_ylabel("Step height $h$ (nm)")
+            ax2.set_title(r"$h$ vs. $n \cdot h_0$")
+
+            fig.tight_layout(rect=[0, 0, 1, 0.93])
+
+        # ------------------------------------------------------------------
+        # Global numbers you can quote in the report
+        # ------------------------------------------------------------------
+        for name, h, h_e in methods:
+            global_summary(name, h, h_e)
+
+        if all_heights_combined.size > 0:
+            # optional global summary for all individual heights
+            mean_all = np.nanmean(all_heights_combined)
+            std_all  = np.nanstd(all_heights_combined, ddof=1)
+            stderr_all = std_all / np.sqrt(all_heights_combined.size)
+            print(
+                f"All column heights combined: "
+                f"{mean_all:.4f} ± {stderr_all:.4f} nm (N = {all_heights_combined.size})"
             )
-        except Exception as e:
-            print(f"Error processing {f}: {e}")
+
+        plt.show()

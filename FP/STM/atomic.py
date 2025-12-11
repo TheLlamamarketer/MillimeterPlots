@@ -8,35 +8,136 @@ from scipy.interpolate import SmoothBivariateSpline
 from sklearn.mixture import GaussianMixture
 from itertools import combinations
 from Functions.help import print_round_val
+from scipy.ndimage import gaussian_filter1d
 
 
 
 def load_wsxm_top(path, header_size=446):
+    """
+    Load a WSxM .top file. This routine attempts to auto-detect the header
+    length and whether the binary data are float32 or float64. It falls back
+    to the provided `header_size` when detection fails.
+
+    Returns
+    -------
+    image : (rows, cols) float ndarray
+    meta  : dict  (keys: 'rows', 'cols', 'x_amp', 'y_amp', 'z_amp' if available)
+    header_text : str
+    """
+    
     with open(path, "rb") as f:
-        header_bytes = f.read(header_size)
-        header = header_bytes.decode("latin-1")
+        data_bytes = f.read()
 
-        # parse a few useful metadata fields
+    total_len = len(data_bytes)
+
+    def parse_meta_from_text(text):
         meta = {}
-        for line in header.splitlines():
+        for line in text.splitlines():
             if "Number of columns" in line:
-                meta["cols"] = int(line.split(":")[1])
+                try:
+                    meta["cols"] = int(line.split(":")[1])
+                except Exception:
+                    pass
             elif "Number of rows" in line:
-                meta["rows"] = int(line.split(":")[1])
+                try:
+                    meta["rows"] = int(line.split(":")[1])
+                except Exception:
+                    pass
             elif "X Amplitude" in line:
-                meta["x_amp"] = float(line.split(":")[1].split()[0])
+                try:
+                    meta["x_amp"] = float(line.split(":")[1].split()[0])
+                except Exception:
+                    pass
             elif "Y Amplitude" in line:
-                meta["y_amp"] = float(line.split(":")[1].split()[0])
+                try:
+                    meta["y_amp"] = float(line.split(":")[1].split()[0])
+                except Exception:
+                    pass
             elif "Z Amplitude" in line:
-                meta["z_amp"] = float(line.split(":")[1].split()[0])
+                try:
+                    meta["z_amp"] = float(line.split(":")[1].split()[0])
+                except Exception:
+                    pass
+        return meta
 
-        # read the remaining binary data as float64
-        data = np.fromfile(f, dtype="<f8")
+    found = False
+    header_text = None
+    chosen_header_size = header_size
+    chosen_dtype = "<f8"
 
-    rows, cols = meta["rows"], meta["cols"]
-    image = data.reshape((rows, cols))  # height map
+    # Try to auto-detect header size and dtype
+    for hs in range(128, 4097):
+        if hs >= total_len:
+            break
+        try:
+            text = data_bytes[:hs].decode("latin-1")
+        except Exception:
+            continue
+        meta = parse_meta_from_text(text)
+        if not ("rows" in meta and "cols" in meta):
+            continue
 
-    return image, meta, header
+        rows = meta["rows"]
+        cols = meta["cols"]
+        expected_count = rows * cols
+
+        remaining = total_len - hs
+
+        # float64?
+        if remaining == expected_count * 8:
+            chosen_header_size = hs
+            chosen_dtype = "<f8"
+            header_text = text
+            found = True
+            break
+        # float32?
+        if remaining == expected_count * 4:
+            chosen_header_size = hs
+            chosen_dtype = "<f4"
+            header_text = text
+            found = True
+            break
+
+    if not found:
+        # fallback
+        try:
+            header_text = data_bytes[:header_size].decode("latin-1")
+            meta = parse_meta_from_text(header_text)
+        except Exception:
+            meta = {}
+        chosen_header_size = header_size
+        chosen_dtype = "<f8"
+
+    if header_text is None:
+        header_text = data_bytes[:chosen_header_size].decode("latin-1", errors="ignore")
+    meta = parse_meta_from_text(header_text)
+
+    rows = meta.get("rows")
+    cols = meta.get("cols")
+    if rows is None or cols is None:
+        raise ValueError("Could not parse rows/cols from .top header")
+
+    payload = data_bytes[chosen_header_size:]
+    arr = np.frombuffer(payload, dtype=chosen_dtype)
+
+    expected_size = rows * cols
+    if arr.size < expected_size:
+        # try alternate dtype
+        alt_dtype = "<f4" if chosen_dtype == "<f8" else "<f8"
+        arr_alt = np.frombuffer(payload, dtype=alt_dtype)
+        if arr_alt.size >= expected_size:
+            arr = arr_alt
+            chosen_dtype = alt_dtype
+
+    if arr.size < expected_size:
+        padded = np.full(expected_size, np.nan, dtype=arr.dtype)
+        padded[:arr.size] = arr
+        arr = padded
+    else:
+        arr = arr[:expected_size]
+
+    image = arr.reshape((rows, cols)).copy()
+    return image, meta, header_text
 
 def gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y, offset):
     x, y = xy
@@ -289,7 +390,7 @@ plt.title("Histogram of nearest neighbor angles")
 plt.tight_layout()
 
 
-labels = gmm.predict(X)
+# labels already computed above with proper sorting, don't overwrite!
 
 plt.figure(figsize=(6,4))
 
@@ -341,6 +442,8 @@ xy_corr = (T1 @ xy.T).T
 
 
 plt.figure(figsize=(6,4))
+im1 = plt.imshow(image, origin="lower", cmap="viridis", extent=[0, x_size_nm, 0, y_size_nm])
+cb1 = plt.colorbar(im1, label=f"Height (pm)")
 plt.scatter(fitted_nm[:,1], fitted_nm[:,2], s=20, c="purple", label="Fitted positions")
 for i in range(dist.shape[1]):
     vx = vecs[:, i, 0]
@@ -395,6 +498,62 @@ for (i, (phi_i, err_i)), (j, (phi_j, err_j)) in combinations(enumerate(angles_me
 print("\nPairwise angle differences:")
 for i, j, diff, diff_err in pairwise_diffs:
     print(f"{i}-{j}: {diff:6.2f} ± {diff_err:5.2f} °")
+
+# --- Average distances in the 3 crystallographic directions ---
+print("\nAverage distances in the 3 crystallographic directions:")
+direction_distances = []
+for i in range(3):
+    mask_dir = (labels == i)
+    distances_in_dir = dist_flat[mask_dir]
+    
+    if len(distances_in_dir) > 0:
+        mean_dist = distances_in_dir.mean()
+        std_dist = distances_in_dir.std()
+        stderr_dist = std_dist / np.sqrt(len(distances_in_dir))
+        direction_distances.append((mean_dist, stderr_dist, std_dist, len(distances_in_dir)))
+        
+        mu, mu_err = angles_mean[i]
+        print(f"Direction {i} (angle {mu:.2f}° ± {mu_err:.2f}°):")
+        print(f"  Mean distance: {mean_dist:.4f} ± {stderr_dist:.4f} nm")
+        print(f"  Std deviation: {std_dist:.4f} nm")
+        print(f"  N bonds: {len(distances_in_dir)}")
+    else:
+        direction_distances.append((np.nan, np.nan, np.nan, 0))
+        print(f"Direction {i}: No bonds found")
+
+# Calculate expected graphene nearest-neighbor distance (0.142 nm)
+# and compare with measurements
+graphene_nn = 0.142  # nm
+print(f"\nLiterature graphene nearest-neighbor distance: {graphene_nn} nm")
+print("Comparison with measurements:")
+for i, (mean_dist, stderr_dist, std_dist, n) in enumerate(direction_distances):
+    if not np.isnan(mean_dist):
+        ratio = mean_dist / graphene_nn
+        print(f"Direction {i}: measured = {mean_dist:.3f} nm ± {stderr_dist:.3f} nm, ratio = {ratio:.3f}")
+
+# --- Histogram of distances per direction ---
+fig_dist = plt.figure(figsize=(10, 4))
+for i in range(3):
+    plt.subplot(1, 3, i+1)
+    mask_dir = (labels == i)
+    distances_in_dir = dist_flat[mask_dir]
+    
+    if len(distances_in_dir) > 0:
+        mean_dist, stderr_dist, std_dist, n = direction_distances[i]
+        mu_angle, err_angle = angles_mean[i]
+        
+        plt.hist(distances_in_dir, bins=30, color=colors[i], alpha=0.7, edgecolor='black')
+        plt.axvline(mean_dist, color='red', linestyle='--', linewidth=2, 
+                   label=f'μ = {mean_dist:.4f} nm')
+        plt.axvline(graphene_nn, color='green', linestyle=':', linewidth=2,
+                   label=f'Graphene = {graphene_nn} nm')
+        plt.xlabel('Distance (nm)')
+        plt.ylabel('Frequency')
+        plt.title(f'Direction {i} ({mu_angle:.1f}°)')
+        plt.legend(fontsize=8)
+
+plt.tight_layout()
+plt.savefig(Path(__file__).with_name("STM_distances_by_direction.pdf"), dpi=300, transparent=True)
 
 angles_rad = np.deg2rad(np.array([angle for angle, err in angles_mean]))
 fig, ax = plt.subplots(subplot_kw={"projection": "polar"}, figsize=(6, 6))
@@ -462,6 +621,73 @@ ax.set_title("", pad=20)
 ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
 plt.tight_layout()
 plt.savefig(Path(__file__).with_name("STM_angles.pdf"), dpi=300, transparent=True)
+
+
+
+# ======================================================================
+# 2D FFT analysis of the graphite lattice
+# ======================================================================
+
+# --- FFT modulus from Gwyddion (optional, for comparison / plotting) ---
+image_fft, meta_fft, header_fft = load_wsxm_top("FP/STM/fft.top")
+image_fft = image_fft.astype(float)
+image_fft[image_fft == 0] = np.nan
+if np.any(np.isfinite(image_fft)):
+    image_fft -= np.nanmin(image_fft)
+image_fft = np.nan_to_num(image_fft, nan=0.0)
+
+# --- Real-space topo used for the FFT (this defines dx, dy!) ----------
+topo_img, topo_meta, _ = load_wsxm_top("FP/STM/topo_0049.f.top")
+topo_img = topo_img.astype(float)
+topo_img -= np.nanmean(topo_img)
+topo_img = np.nan_to_num(topo_img, nan=0.0)
+
+rows_t, cols_t = topo_img.shape
+x_size_nm_t = topo_meta["x_amp"] * 1e9
+y_size_nm_t = topo_meta["y_amp"] * 1e9
+dx_nm = x_size_nm_t / cols_t
+dy_nm = y_size_nm_t / rows_t
+
+# --- FFT in Python ----------------------------------------------------
+fft2 = np.fft.fft2(topo_img)
+fft2_shift = np.fft.fftshift(fft2)
+fft_mod_python = np.abs(fft2_shift)
+
+# frequency axes in cycles / nm (Nyquist-limited)
+kx = np.fft.fftshift(np.fft.fftfreq(cols_t, d=dx_nm))
+ky = np.fft.fftshift(np.fft.fftfreq(rows_t, d=dy_nm))
+
+fft_modulus = fft_mod_python   # or: fft_modulus = image_fft
+
+rows_f, cols_f = fft_modulus.shape
+Y_idx, X_idx = np.indices((rows_f, cols_f))
+cy, cx = rows_f // 2, cols_f // 2
+r_pix = np.sqrt((X_idx - cx)**2 + (Y_idx - cy)**2)
+
+# For plotting we map pixel indices to kx, ky using the topo’s dx, dy
+kx_plot = (np.arange(cols_f) - cols_f // 2) / (cols_f * dx_nm)
+ky_plot = (np.arange(rows_f) - rows_f // 2) / (rows_f * dy_nm)
+
+fig_fft = plt.figure(figsize=(6, 5))
+im_fft = plt.imshow(
+    np.log10(fft_modulus + 1e-16),
+    origin="lower",
+    cmap="magma",
+    extent=[kx_plot.min(), kx_plot.max(), ky_plot.min(), ky_plot.max()],
+)
+plt.colorbar(im_fft, label=r"$\log_{10} |F(k_x,k_y)|$")
+plt.xlabel(r"$k_x$ (cycles / nm)")
+plt.ylabel(r"$k_y$ (cycles / nm)")
+plt.title("2D FFT modulus of STM image")
+plt.tight_layout()
+
+
+
+
+
+
+
+
 plt.show()
 
 
