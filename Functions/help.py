@@ -1,6 +1,4 @@
-from collections.abc import Sequence
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
 from lmfit import Model
 from decimal import Decimal, getcontext
@@ -56,16 +54,10 @@ def print_round_val(val, err=0, intermed=True):
         rounded_val, _, _ = round_val(val, err=0, intermed=intermed)
         return rounded_val
     else:
-        rounded_val, rounded_err, _ = round_val(val, err=err, intermed=intermed)
-        return f"{rounded_val} \\pm {rounded_err}"
+        rounded_val, rounded_err, power = round_val(val, err=err, intermed=intermed)
+        return f"{rounded_val:.{max(0, power)}f} \\pm {rounded_err:.{max(0, power)}f}"
 
-def calc_sums(xdata, ydata, weights):
-    Sx = np.sum(weights * xdata)
-    Sy = np.sum(weights * ydata)
-    Sxx = np.sum(weights * xdata * xdata)
-    Sxy = np.sum(weights * xdata * ydata)
-    Sw = np.sum(weights)
-    return Sx, Sxx, Sy, Sxy, Sw
+
 
 def slope(xdata, ydata, yerr=None):
     if yerr is None: yerr = np.ones_like(ydata)
@@ -76,7 +68,12 @@ def slope(xdata, ydata, yerr=None):
 
     weights = np.where(yerr == 0, 0, 1.0 / (yerr ** 2))
 
-    Sx, Sxx, Sy, Sxy, Sw = calc_sums(xdata, ydata, weights)
+    Sx = np.sum(weights * xdata)
+    Sy = np.sum(weights * ydata)
+    Sxx = np.sum(weights * xdata * xdata)
+    Sxy = np.sum(weights * xdata * ydata)
+    Sw = np.sum(weights)
+
     denominator = Sw * Sxx - Sx ** 2
     if denominator == 0:
         raise ValueError("Denominator is zero; cannot compute slope and intercept.")
@@ -102,94 +99,90 @@ def slope(xdata, ydata, yerr=None):
 
     return a, da, b, db, R2, variance
 
-def lmfit(xdata, ydata, yerr=None, model="linear", constraints=None, const_weight=0, initial_params=None):
+def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constraints = None, initial_params=None):
     """
     Fit data to a specified model: linear, quadratic, or exponential.
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
     """
-    if yerr is not None and not hasattr(yerr, "__len__"):
-        yerr = np.array([yerr])
 
-    # Remove NaN and infinite values
-    mask = ~np.isnan(xdata) & ~np.isnan(ydata) & np.isfinite(xdata) & np.isfinite(ydata)
-    if yerr is not None:
-        mask &= ~np.isnan(yerr) & np.isfinite(yerr)
-        if isinstance(yerr, (float, int)) or len(yerr) == 1:
-            yerr = np.array(yerr) * len(mask)
-        elif isinstance(yerr, (list, np.ndarray)):
-            yerr = yerr[mask]
-    xdata, ydata = xdata[mask], ydata[mask]
+    x = np.asarray(xdata, dtype=float)
+    y = np.asarray(ydata, dtype=float)
 
-    # Define models and initial parameters
+    if x.shape != y.shape:
+        raise ValueError("xdata and ydata must have the same shape.")
+    
+    if yerr is None:
+        yerr_arr = None
+    else:
+        yerr_arr = np.asarray(yerr, dtype=float)
+        if yerr_arr.shape != y.shape:
+            if yerr_arr.size == 1:
+                yerr_arr = np.full_like(y, yerr_arr.item())
+            else:
+                raise ValueError("yerr must have the same shape as ydata or be a single value.")
+    
+    mask = ~np.isnan(x) & ~np.isnan(y) & np.isfinite(x) & np.isfinite(y)
+    if yerr_arr is not None:
+        mask &= ~np.isnan(yerr_arr) & np.isfinite(yerr_arr)
+    x, y = x[mask], y[mask]
+    if yerr_arr is not None:
+        yerr_arr = yerr_arr[mask]
+
     models = {
         "linear": (lambda x, a, b: a + b * x, {"a": 0, "b": 1}),
         "quadratic": (lambda x, a, b, c: a + b * x + c * x**2, {"a": 0, "b": 1, "c": 1}),
-        "exponential": (lambda x, a, b, c: a * np.exp(b * x) + c, {"a": np.max(ydata), "b": 0.2, "c": np.min(ydata)}),
-        "exponential_decay": (lambda x, a, b, c: a * (1 - np.exp(-b * x + c)), {"a": np.max(ydata), "b": 0.7, "c": 0}),
-        "gaussian": (lambda x, a, b, c, d: a * np.exp(-((x - b) / c)**2 / 2) + d, {"a": np.max(ydata), "b": np.mean(xdata), "c": 1, "d": np.min(ydata)})
+        "exponential": (lambda x, a, b, c: a * np.exp(b * x) + c, {"a": np.max(y), "b": 0.2, "c": np.min(y)}),
+        "exponential_decay": (lambda x, a, b, c: a * (1 - np.exp(-b * x + c)), {"a": np.max(y), "b": 0.7, "c": 0}),
+        "gaussian": (lambda x, a, b, c, d: a * np.exp(-((x - b) / c)**2 / 2) + d, {"a": np.max(y), "b": np.mean(x), "c": 1, "d": np.min(y)})
     }
 
-    if model not in models:
-        raise ValueError(f"Unrecognized model: {model}")
-
-    model_func, init_params = models[model]
-    if initial_params:
-        init_params.update(initial_params)
+    if isinstance(model, str):
+        if model in models:
+            model_func, init = models[model]
+            if initial_params:
+                init.update(initial_params)
+        else:
+            raise ValueError(f"Model '{model}' is not recognized. Available models: {list(models.keys())}")
+    else:
+        model_func = model
+        init = initial_params if initial_params is not None else {}
         
     mode_func = Model(model_func)
-    params = mode_func.make_params(**init_params)
+    params = mode_func.make_params(**init)
 
     if constraints:
         for param, value in constraints.items():
-            if value is not None:
-                if isinstance(value, dict):  # Allow setting min/max
-                    params[param].set(**value)
-                else:
-                    params[param].set(value=value, vary=False)
-
-
-    if yerr is not None:
-        weights = np.where(yerr == 0, 0, 1.0 / yerr**2)
-        w = sum(weights)/len(weights)
-        result = mode_func.fit(ydata, params, x=xdata, weights=weights + const_weight/w)
-    else:
-        result = mode_func.fit(ydata, params, x=xdata)
-
-    #print(result.fit_report())
-
-    return result
-
-def calc_CI(result, xdata, sigmas=[1]):
-    """
-    Calculate confidence intervals for the fit using eval_uncertainty.
-    Returns:
-    - ci_list: List of tuples with (lower, upper) bounds for the fit curve at different sigma levels.
-    """
-    ci_list = []
-    sigmas_list = [None, None, None]
-    try:
-        if not hasattr(sigmas, "__len__"):
-            sigmas_list[sigmas - 1] = sigmas
-        else:
-            for sigma in sigmas:
-                sigmas_list[sigma - 1] = sigma
-        for sigma in sigmas_list:
-            if sigma is None:
-                ci_list.append((None, None))
+            if value is None:
                 continue
-            # Calculate uncertainty at the given sigma level
-            uncertainty = result.eval_uncertainty(sigma=sigma, x=xdata)
-            best_fit = result.eval(x=xdata)
+            if isinstance(value, dict): 
+                params[param].set(**value)
+            else:
+                params[param].set(value=value, vary=False)
+    
+    if yerr_arr is None:
+        return mode_func.fit(y, params, x=x)
+    
+    sigma_floor = 1e-12
+    yerr_arr = np.where(yerr_arr < sigma_floor, sigma_floor, yerr_arr)
+    weights = 1.0 / yerr_arr
 
-            lower = best_fit - uncertainty
-            upper = best_fit + uncertainty
+    return mode_func.fit(y, params, x=x, weights=weights)
 
-            ci_list.append((lower, upper))
-    except Exception as e:
-        logging.error(f"Error calculating confidence intervals: {e}")
-        for sigma in sigmas_list:
-            ci_list.append((np.full_like(xdata, np.nan), np.full_like(xdata, np.nan)))
-    return ci_list
+def calc_CI(result, xdata, sigmas=(1,)):
+    """
+    Returns {sigma: (lower, upper)} for each requested sigma.
+    """
+    x = np.asarray(xdata, dtype=float)
+    out = {}
+    best = result.eval(x=x)
+
+    for s in sigmas:
+        if s < 0:
+            raise ValueError("Sigma levels must be positive integers.")
+        uncertainty = result.eval_uncertainty(sigma=s, x=x)
+        out[s] = (best - uncertainty, best + uncertainty)
+
+    return out
 
 def extract_params(result):
     params_dict = {}
@@ -202,32 +195,20 @@ def extract_params(result):
 def calc_R2(result):
     return result.rsquared
 
-def print_fit_summary(result):
-    print("Parameters and their errors:")
-    for param, param_obj in result.params.items():
-        print(f"{param:1}: {param_obj.value:6.4g} ± {param_obj.stderr:8.4g}  ({abs(param_obj.stderr/param_obj.value):.2%})")
-
-    print(f"\nR^2: { result.rsquared}")
-
-    report = result.fit_report()
-    cov_start = report.find("Correlations")
-    if cov_start != -1:
-        print(report[cov_start:])
-    else:
-        print("No covariances found in the fit report.")
-    #print(result.fit_report())
-
-def plot(x, y, dy, a, b, da, db, xlabel="x", ylabel="y", title=None):
-    plt.errorbar(x, y, yerr=dy, fmt="kx", capsize=6, capthick=1, label="Datenpunkte")  
-    if da != 0 and db != 0:
-        plt.plot(x, a + da + (b - db) * x, "r--", label="Grenzgeraden")
-        plt.plot(x, a - da + (b + db) * x, "r--")  
-    if a != 0 and da != 0:
-        plt.plot(x, a + b * x, "g-", label="Ausgleichsgerade")  
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    if title is not None:
-        plt.title(title)
-    plt.grid()
-    plt.legend(loc="best")
-    plt.show()
+def fit_summary_string(result) -> str:
+    lines = ["Parameters and their errors:"]
+    for name, p in result.params.items():
+        val = p.value
+        err = p.stderr
+        if err is None or not np.isfinite(err):
+            rel = "n/a"
+            err_str = "n/a"
+        else:
+            err_str = f"{err:8.4g}"
+            rel = "inf" if val == 0 else f"{abs(err/val):.2%}"
+        lines.append(f"{name:>8}: {val:6.4g} ± {err_str}  ({rel})")
+    try:
+        lines.append(f"\nR^2: {result.rsquared}")
+    except Exception:
+        pass
+    return "\n".join(lines)

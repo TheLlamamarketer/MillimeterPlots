@@ -854,7 +854,7 @@ def plot_data(
                     yerr=None if s.yerr is None else [np.abs(yerr_lower), np.abs(yerr_upper)],
                     fmt=s.marker if s.marker != "None" else "o",
                     markeredgecolor=(oc if outline else None) if not s.marker == "x" else None,
-                    color=color, ecolor=color, elinewidth=0.9, capsize=3, capthick=0.9,
+                    color=color, ecolor=color, elinewidth=0.9, capsize=3, capthick=0.9, linestyle=s.line,
                     markersize=max(4, s.markersize / 3), alpha=s.alpha, zorder=s.zorder+1,
                     label=s.label)
                 if outline:
