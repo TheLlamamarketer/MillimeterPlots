@@ -13,7 +13,7 @@ def FirstSignificant(x):
 def LastSignificant(x):
     if x == 0:
         return 0
-    d = Decimal(str(x))
+    d = Decimal(str(x)) if not isinstance(x, Decimal) else x
     fractional_part = str(d).split('.')[-1] if '.' in str(d) else ''
     return len(fractional_part)
 
@@ -99,7 +99,7 @@ def slope(xdata, ydata, yerr=None):
 
     return a, da, b, db, R2, variance
 
-def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constraints = None, initial_params=None):
+def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constraints = None, initial_params=None, scale_covar=False):
     """
     Fit data to a specified model: linear, quadratic, or exponential.
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
@@ -160,13 +160,13 @@ def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constrain
                 params[param].set(value=value, vary=False)
     
     if yerr_arr is None:
-        return mode_func.fit(y, params, x=x)
+        return mode_func.fit(y, params, x=x, scale_covar=scale_covar)
     
     sigma_floor = 1e-12
     yerr_arr = np.where(yerr_arr < sigma_floor, sigma_floor, yerr_arr)
     weights = 1.0 / yerr_arr
 
-    return mode_func.fit(y, params, x=x, weights=weights)
+    return mode_func.fit(y, params, x=x, weights=weights, scale_covar=scale_covar)
 
 def calc_CI(result, xdata, sigmas=(1,)):
     """

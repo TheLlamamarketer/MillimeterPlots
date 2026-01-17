@@ -622,7 +622,7 @@ def plot_data(
         if xticks is not None and yticks is not None and xlim is not None and ylim is not None and not (is_x_log or is_y_log):
             _draw_dense_grid(ax, xlim, ylim, width, height, bg_hex, xticks, yticks)
         else:
-            gray = mcolors.to_rgb("#8d939d")
+            gray = mcolors.to_rgb("#a0a0a0")
             ax.grid(True, which="major", color=_ensure_contrast(gray, mcolors.to_rgb(bg_hex)))
             ax.grid(True, which="minor", linestyle=":", linewidth=0.6, alpha=0.8,
                     color=_ensure_contrast(gray, mcolors.to_rgb(bg_hex)))
@@ -650,15 +650,16 @@ def plot_data(
 
             # Confidence bands (behind everything)
             if s.confidence is not None:
-                for k, (lo, hi) in enumerate(s.confidence):
+                for key in s.confidence.keys() if isinstance(s.confidence, dict) else range(len(s.confidence)):
+                    lo, hi = s.confidence[key]
                     if lo is None or hi is None:
                         continue
                     xci = np.asarray(s.fit_x if s.fit_x is not None else x, dtype=float)
                     lo = np.asarray(lo, dtype=float)
                     hi = np.asarray(hi, dtype=float)
-                    alpha = max(0.1, 0.5 - 0.08 * k)
+                    alpha = max(0.1, 0.5 - 0.08 * key)
                     ax.fill_between(xci, lo, hi, facecolor=color, edgecolor=None, 
-                                    alpha=alpha, zorder=2, label=s.label + f" {k+1}σ Confidence Interval" if s.confidence_label and s.label else None)
+                                    alpha=alpha, zorder=2, label=s.label + f" {key}σ Confidence Interval" if s.confidence_label and s.label else None)
                     
             # Axlines
             if s.axlines is not None:

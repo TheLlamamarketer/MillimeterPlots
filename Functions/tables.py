@@ -98,6 +98,10 @@ def _fmt_pair_with_shared_exp(v: float, e: float, p: int | None, *, hi: float = 
     return f"({sv} \\pm {se})e{k}"
 
 
+
+
+
+
 # ----------------- core: STANDARD -----------------
 def print_standard_table(
     data: Dict[str, Any],
@@ -116,7 +120,7 @@ def print_standard_table(
     """
     if not show:
         return
-    
+
     data = _normalize_rowwise(data, headers)
 
     # column layout
@@ -230,6 +234,12 @@ def print_standard_table(
         print(f"    \\label{{{label}}}")
     print(r"\end{table}")
     return
+
+
+
+
+
+
 
 # ----------------- core: COMPLEX (multi-block) -----------------
 def print_complex_table(
@@ -368,6 +378,10 @@ def print_complex_table(
         print(f"    \\label{{{label}}}")
     print(r"\end{table}")
     return
+
+
+
+
 
 # --------------- optional: DatasetSpec → blocks ---------------
 def datasets_to_table_blocks(

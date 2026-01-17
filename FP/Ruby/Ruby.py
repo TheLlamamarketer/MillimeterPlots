@@ -6,6 +6,7 @@ from scipy.signal import find_peaks, peak_widths
 from scipy.interpolate import make_splrep, interp1d
 from scipy.optimize import fsolve, minimize_scalar
 from SVG_ST import spline_A2, spline_T2, spline_T1
+import matplotlib.pyplot as plt
 
 
 repo_root = Path(__file__).resolve().parents[2]
