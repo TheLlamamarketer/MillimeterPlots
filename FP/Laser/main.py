@@ -18,7 +18,12 @@ factor = 2 * np.sqrt(2 * np.log(2))
 
 cos2 = lambda x, a, c, d: a * np.cos(np.radians(x - c))**2 + d
 
+def calc_Intensity_error(I):
+    I_dec = Decimal(str(I))
+    ld = last_digit(I_dec)
+    return float(ld*2 + 0.01*float(I_dec))
 
+# Task 2
 
 data2 = {
     'Angle': np.array([0, 10, 20, 30, 40, 50, 60, 70, 80, 85, 90, 100, 110, 120, 130, 140, 150, 160, 170, 175, 180, 190, 200]),
@@ -30,7 +35,7 @@ data2 = {
 
 angles = data2['Angle']
 Intensity = np.array([float(Decimal(str(i))) for i in data2['Intensity']])
-dIntensity = np.array([last_digit(Decimal(str(i)))*1 for i in data2['Intensity']])
+dIntensity = np.array([calc_Intensity_error(i) for i in data2['Intensity']])
 Baseline = np.array([float(Decimal(str(b))) for b in data2['Baseline']])
 
 Intensity = Intensity * max(Baseline)/Baseline
@@ -73,6 +78,15 @@ print_standard_table(
 )
 
 
+L = 4.13e-3
+T1 = 6.5e-6
+dT1 = 0.05e-6
+T2 = 2.26e-6
+dT2 = 0.05e-6
+
+print(f"T1 Mirror Transmissivity:{T1/L*100:.2g} % ± {dT1/L*100:.2g} %")
+print(f"T2 Mirror Transmissivity:{T2/L*100:.2g} % ± {dT2/L*100:.2g} %")
+print('-'*40)
 
 # Task 6
 
@@ -84,9 +98,11 @@ data6 = {
     'Baseline': np.array([182, 183, 180, 178, 180, 178, 178, 178, 178, 179, 178, 178, 178, 178, 178, 179, 180, 179, 179, 178, 178, 179, 178]),
 }
 
+
+
 angles6 = data6['Angle']
 Intensity6 = np.array([float(Decimal(str(i))) for i in data6['Intensity']])/1e3
-dIntensity6 = np.array([last_digit(Decimal(str(i)))*1 for i in data6['Intensity']])/1e3
+dIntensity6 = np.array([calc_Intensity_error(i) for i in data6['Intensity']])/1e3
 Baseline6 = data6['Baseline']/1e3
 
 Intensity6 = Intensity6 *max(Baseline6)/Baseline6
@@ -177,8 +193,8 @@ S2 = (26.5 + 32.45)/2
 
 data7 = {
     'Position': np.array([76, 76.5, 77, 77.5, 78, 78.5, 79, 79.5, 80, 80.5, 81, 81.5, 82, 82.5, 82, 81.5, 81, 80.5, 80, 79, 76.5]),
-    'dPosition': 0.1*np.sqrt(2),
-    'Intensity': np.array([89.3, 105, 91.5, 69.5, 73.3, 59.0, 53.0, 20.0, 2.70, 3.00, 2.10, 2.23, 2.13, 2.15, 2.14, 2.12, 2.07, 2.10, 11.2, 13.5, 66.6]),
+    'dPosition': 0.1*np.sqrt(2)+0.1,
+    'Intensity': [89.3, 105, 91.5, 69.5, 73.3, "59.0", "53.0","20.0", 2.70, "3.00", "2.10", 2.23, 2.13, 2.15, 2.14, 2.12, 2.07, "2.10", 11.2, 13.5, 66.6],
     'dIntensity': np.array([0.3, 0.3, 0.2, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.2, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.3, 0.2, 0.3]),
 }
 data7['Position'] = data7['Position'] - S2
@@ -188,7 +204,7 @@ mask_rest = np.ones_like(data7['Position'], dtype=bool)
 mask_rest[mask] = False
 
 
-data7.update({'dPosition': np.array(data7['dPosition'] * np.ones_like(data7['Position']))})
+data7.update({'dPosition': np.array(data7['dPosition'] * np.ones_like(data7['Position'])), 'Intensity': np.array([float(Decimal(str(i))) for i in data7['Intensity']]), 'dIntensity': np.array([calc_Intensity_error(i) for i in data7['Intensity']])})
 
 hinge = lambda x, m, L0, Pbg: Pbg + np.maximum(0.0, m*(L0 - x))
 
