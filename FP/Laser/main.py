@@ -14,14 +14,14 @@ from Functions.plotting import *
 from Functions.tables import *
 
 
-factor = 2 * np.sqrt(2 * np.log(2))
+factor = np.sqrt(8 * np.log(2)) # factor to convert sigma to FWHM because we have lorentzian peaks
 
 cos2 = lambda x, a, c, d: a * np.cos(np.radians(x - c))**2 + d
 
 def calc_Intensity_error(I):
     I_dec = Decimal(str(I))
     ld = last_digit(I_dec)
-    return float(ld*2 + 0.01*float(I_dec))
+    return float(ld + 0.008*float(I_dec))
 
 # Task 2
 
@@ -49,30 +49,32 @@ results = lmfit(data2['Angle'], data2['Intensity'], model=cos2, initial_params=i
 
 fitx = np.linspace(0, 200, 500)
 
-s2 = DatasetSpec(x=data2['Angle'], y=data2['Intensity'],
-                yerr=data2['dIntensity'], 
-                xerr=data2['dAngle'],
-                fit_y=results.eval(x=fitx), fit_x=fitx,
-                label="Measured Data")
+s2 = DatasetSpec(
+    x=data2['Angle'], y=data2['Intensity'],
+    yerr=data2['dIntensity'], xerr=data2['dAngle'],
+    fit_y=results.eval(x=fitx), fit_x=fitx,
+    label="Gemessene Daten"
+)
 
 plot_data(
     s2,
-    title="Laser Intensity vs Angle",
-    xlabel="Angle (°)",
-    ylabel="Intensity (mW)",
+    title="Polarisationskurve des Justierlasers",
+    xlabel="Winkel (°)",
+    ylabel="Intensität (mW)",
     filename=repo_root / "FP" / "Laser" / "A2.pdf",
     plot=False
 )
 
 headers2 = {
     'Angle':     {'label': '{Winkel (°)}', 'intermed': False, 'err': data2['dAngle']},
-    'Intensity': {'label': '{Intensität (mW)}', 'intermed': False, 'err': data2['dIntensity']},
+    'Intensity': {'label': '{Intensität I (mW)}', 'intermed': False, 'err': data2['dIntensity']},
+    'Baseline':  {'label': '{Basis (mW)}', 'intermed': True},
 }
 
 print_standard_table(
     data=data2,
     headers=headers2,
-    caption="Gemessene Winkelabhängigkeit von Justierlaserintensität durch Polarisationsfilter.",
+    caption="Gemessene Winkelabhängigkeit von Justierlaserintensität durch ein Polarisationsfilter. Die Intensitätswerte wurden mit den Basiswerten normalisiert (also mit dem Verhältnis $\\mathrm{max(Basis)}/\\mathrm{Basis}$ multipliziert).",
     label="tab:A2",
     show=True
 )
@@ -84,8 +86,9 @@ dT1 = 0.05e-6
 T2 = 2.26e-6
 dT2 = 0.05e-6
 
-print(f"T1 Mirror Transmissivity:{T1/L*100:.2g} % ± {dT1/L*100:.2g} %")
-print(f"T2 Mirror Transmissivity:{T2/L*100:.2g} % ± {dT2/L*100:.2g} %")
+
+print(f"$T1 = {print_round_val(T1/L*100, dT1/L*100)} \\%$")
+print(f"$T2 = {print_round_val(T2/L*100, dT2/L*100)} \\%$")
 print('-'*40)
 
 # Task 6
@@ -101,9 +104,9 @@ data6 = {
 
 
 angles6 = data6['Angle']
-Intensity6 = np.array([float(Decimal(str(i))) for i in data6['Intensity']])/1e3
-dIntensity6 = np.array([calc_Intensity_error(i) for i in data6['Intensity']])/1e3
-Baseline6 = data6['Baseline']/1e3
+Intensity6 = np.array([float(Decimal(str(i))) for i in data6['Intensity']])
+dIntensity6 = np.array([calc_Intensity_error(i) for i in data6['Intensity']])
+Baseline6 = data6['Baseline']
 
 Intensity6 = Intensity6 *max(Baseline6)/Baseline6
 
@@ -113,30 +116,32 @@ initcos6 = {'a':0.1, 'c':170, 'd':0.001}
 results6 = lmfit(data6['Angle'], data6['Intensity'], model=cos2, initial_params=initcos6, yerr=data6['dIntensity'])
 
 
-s6 = DatasetSpec(x=data6['Angle'], y=data6['Intensity'],
-                yerr=data6['dIntensity'], xerr=data6['dAngle'],
-                label="Measured Data",
-                fit_y=results6.eval(x=fitx), fit_x=fitx,    
+s6 = DatasetSpec(
+    x=data6['Angle'], y=data6['Intensity'],
+    yerr=data6['dIntensity'], xerr=data6['dAngle'],
+    label="Gemessene Daten",
+    fit_y=results6.eval(x=fitx), fit_x=fitx,
 )
 
 plot_data(
     s6,
-    title="Laser Intensity vs Angle (High Power)",
-    xlabel="Angle (°)",
-    ylabel="Intensity (mW)",
+    title="Polarisationskurve des Messlasers",
+    xlabel="Winkel (°)",
+    ylabel="Intensität ($\\mu W$)",
     filename=repo_root / "FP" / "Laser" / "A6.pdf",
     plot=False
 )
 
 headers6 = {
     'Angle':     {'label': '{Winkel (°)}', 'intermed': False, 'err': data6['dAngle']},
-    'Intensity': {'label': '{Intensität (mW)}', 'intermed': False, 'err': data6['dIntensity']},
+    'Intensity': {'label': '{Intensität I ($\\mu W$)}', 'intermed': False, 'err': data6['dIntensity']},
+    'Baseline':  {'label': '{Basis ($\\mu W$)}', 'intermed': False},
 }
 
 print_standard_table(
     data=data6,
     headers=headers6,
-    caption="Gemessene Winkelabhängigkeit von Messlaserintensität durch Polarisationsfilter.",
+    caption="Gemessene Winkelabhängigkeit von Messlaserintensität durch ein Polarisationsfilter. Die Intensitätswerte wurden mit den Basiswerten normalisiert (also mit dem Verhältnis $\\mathrm{max(Basis)}/\\mathrm{Basis}$ multipliziert).",
     label="tab:A6",
     show=True
 )
@@ -145,9 +150,11 @@ print_standard_table(
 
 print('-'*40)
 print('Fit Results for Task 2 and 6:')
-print(f"$c_{{Just}} = {print_round_val(results.params['c'].value, results.params['c'].stderr)} $°")
+print(f"$\\phi_{{Just}} = {print_round_val(results.params['c'].value, results.params['c'].stderr)} $°")
 
-print(f"$c_{{Mess}} = {print_round_val(results6.params['c'].value, results6.params['c'].stderr)} $°")
+phi_mess = results6.params['c'].value % 180-180
+phi_mess_err = results6.params['c'].stderr
+print(f"$\\phi_{{Mess}} = {print_round_val(phi_mess, phi_mess_err)} $°")
 
 
 """
@@ -210,6 +217,13 @@ hinge = lambda x, m, L0, Pbg: Pbg + np.maximum(0.0, m*(L0 - x))
 
 results7 = lmfit(data7['Position'][mask], data7['Intensity'][mask], model=hinge, initial_params={'m':23, 'L0':51, 'Pbg':2.2})
 
+print('-'*40)
+print("Original transmission values:")
+print(f"$T_1 = {T1} \\, \\mu W$, $T_2 = {T2} \\, \\mu W$")
+print(f"new transmission values with pbg subtracted: $I_{{S1}} = {print_round_val(T1*1e6 - results7.params['Pbg'].value, results7.params['Pbg'].stderr)} \\, \\mu W$, $I_{{S2}} = {print_round_val(T2*1e6 - results7.params['Pbg'].value, results7.params['Pbg'].stderr)} \\, \\mu W$")
+print(f"new Transmission percentages: $T_1 = {print_round_val((T1*1e6 - results7.params['Pbg'].value)/I*100*1e-6)} \\, \\%$, $T_2 = {print_round_val((T2*1e6 - results7.params['Pbg'].value)/I*100*1e-6)} \\, \\%$")
+print('-'*40)
+
 fit_pos = results7.eval(x=data7['Position'][mask])
 
 sigma = np.sqrt(1/(len(data7['Position'][mask]) - len(results7.params)) * np.sum(((data7['Intensity'][mask] - fit_pos))**2 ) )
@@ -225,7 +239,7 @@ fitx = np.linspace(data7['Position'].min(), data7['Position'].max(), 400)
 print(results7.fit_report())
 print('-'*40)
 
-print(f"Radius of sperical resonator: R = {print_round_val(results7.params['L0'].value, results7.params['L0'].stderr)} cm")
+print(f"Radius of sperical resonator: $R = {print_round_val(results7.params['L0'].value, results7.params['L0'].stderr)} \\,cm$")
 print('-'*40)
 
 s7 = DatasetSpec(x=data7['Position'][mask], y=data7['Intensity'][mask], marker='x',
@@ -245,9 +259,9 @@ headers7 = {
 
 plot_data(
     [s7, s7_rest],
-    title="Cavity Length vs Light Intensity",
-    xlabel="Länge L (cm)",
-    ylabel="Intensität (μW)",
+    title="Messlaserintensität in Abhängigkeit der Resonatorlänge",
+    xlabel="Resonatorlänge $L$ (cm)",
+    ylabel="Leistung ($\\mu W$)",
     filename=repo_root / "FP" / "Laser" / "A7.pdf",
     plot=False
 )
@@ -277,8 +291,6 @@ data9['dPosition'] = np.array(data9['dPosition'] * np.ones_like(data9['Position'
 
 delta_err = np.sqrt((data9['fwhm1'])**2 + (data9['fwhm2'])**2)/factor
 
-print(delta_err)
-
 freq = v_FSR_FP * data9['delta'] / t_FP
 freq_err = freq * np.sqrt( (delta_err/data9['delta'])**2 + (v_FSR_mode_err/v_FSR_mode)**2 + (t_err/t_FP)**2 )
 
@@ -295,21 +307,21 @@ s9 = DatasetSpec(x=1/data9['Position'], y=freq,
 
 headers9 = {
     'Position':     {'label': '{Position (cm)}', 'intermed': False, 'err': data9['dPosition']*100, 'data': data9['Position']*100},
-    'delta': {'label': '{Zeitdifferenz $\\Delta t (\\mu s)$}', 'intermed': True, 'err': delta_err*1e6, 'data': data9['delta']*1e6},
-    'Frequency': {'label': '{FSR (MHz)}', 'intermed': True, 'err': freq_err*1e-6, 'data': freq*1e-6},
+    'delta': {'label': '{$\\Delta t_{FSR} (\\mu s)$}', 'intermed': True, 'err': delta_err*1e6, 'data': data9['delta']*1e6},
+    'Frequency': {'label': '{$\\nu_{FSR}$ (MHz)}', 'intermed': True, 'err': freq_err*1e-6, 'data': freq*1e-6},
 }
 s10 = DatasetSpec(x=1/fitx, y=constants.c/2 * (1/fitx), label="Theoretische Vorhersage", line='--', marker='None')
 
 print(results9.fit_report())
 print('-'*40)
-print(f"a = ${print_round_val(results9.params['a'].value, results9.params['a'].stderr)}$")
+print(f"$a = {print_round_val(results9.params['a'].value, results9.params['a'].stderr)} \\, Hz\\,m$")
 print('-'*40)
 
 plot_data(
     [s9, s10],
-    title="Frequenzabweichung vs Position",
-    xlabel="1/Position (1/m)",
-    ylabel="Frequenzabweichung (Hz)",
+    title="Longitudinaler Modenabstand in Abhängigkeit von $1/L$",
+    xlabel="$1/L$ (1/m)",
+    ylabel="$\\nu_{FSR}$ (Hz)",
     filename=repo_root / "FP" / "Laser" / "A9.pdf",
     plot=False
 )

@@ -22,9 +22,6 @@ for center in [-2, 2]:
         y += gauss(x, xk, Ak, sigma=0.2, shift=shift)
 
 peaks = find_peaks(y, height=0.05)[0]
-print("Peaks at:", x[peaks], y[peaks])
-
-
 ax.plot(x, y, color="black", linewidth=1.2)
 
 # Mode numbers below x-axis
@@ -32,13 +29,13 @@ labels = list(zip(x[peaks], [str(i) for i in range(1, len(peaks) + 1)]))
 for xv, s in labels:
     ax.text(xv, 0.0, s, ha="center", va="top", clip_on=False)
 
-# Double-arrow annotations
+# Frabipero spacing Δt
 ax.annotate(
     "",
     xy=(x[peaks[-2]], 0.98), xytext=(x[peaks[1]], 0.98),
     arrowprops=dict(arrowstyle="<->", linewidth=2, color="black"),
 )
-ax.text((x[peaks[1]] + x[peaks[-2]]) / 2, 0.98 + 0.03, r"$\Delta \,t$", ha="center", va="bottom", clip_on=False, fontsize=14)
+ax.text((x[peaks[1]] + x[peaks[-2]]) / 2, 0.98 + 0.03, f"$\\Delta \\,t_{{FP}}$", ha="center", va="bottom", clip_on=False, fontsize=14)
 
 # ν_FSB
 ax.annotate(
@@ -46,7 +43,7 @@ ax.annotate(
     xy=(x[peaks[-1]], 0.525), xytext=(x[peaks[-2]], 0.525),
     arrowprops=dict(arrowstyle="<->", linewidth=2, color="black"),
 )
-ax.text((x[peaks[-1]] + x[peaks[-2]]) / 2, 0.525 + 0.01, r"$t_{FSB}$", ha="center", va="bottom", clip_on=False, fontsize=14)
+ax.text((x[peaks[-1]] + x[peaks[-2]]) / 2, 0.525 + 0.01, f"$\\Delta \\,t_{{FSR}}$", ha="center", va="bottom", clip_on=False, fontsize=14)
 
 # FWHM
 ax.annotate(
@@ -54,11 +51,15 @@ ax.annotate(
     xy=(-1.9, 0.49), xytext=(-2.3, 0.49),
     arrowprops=dict(arrowstyle="<->", linewidth=2, color="black"),
 )
-ax.text((-2.3 - 1.9) / 2, 0.49 - 0.03, r"$\mathrm{FWHM}$", ha="center", va="top", fontsize=14, clip_on=False)
+ax.text((-2.3 - 1.9) / 2, 0.49 - 0.03, f"$\\mathrm{{FWHM}}$", ha="center", va="top", fontsize=14, clip_on=False)
 
 
-ax.set_xlabel(r"$t$")
-ax.set_ylabel(r"$I$")
+
+# set axis invisible
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.spines['left'].set_visible(False)
+ax.spines['bottom'].set_visible(False)
 
 ax.set_xticks([])
 ax.set_yticks([])
