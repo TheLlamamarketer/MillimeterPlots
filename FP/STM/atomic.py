@@ -1,3 +1,4 @@
+import re
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -7,6 +8,10 @@ from sklearn.neighbors import NearestNeighbors
 from scipy.interpolate import SmoothBivariateSpline
 from sklearn.mixture import GaussianMixture
 from itertools import combinations
+
+import sys 
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
 from Functions.help import print_round_val
 from scipy.ndimage import gaussian_filter1d
 
@@ -24,7 +29,7 @@ def load_wsxm_top(path, header_size=446):
     meta  : dict  (keys: 'rows', 'cols', 'x_amp', 'y_amp', 'z_amp' if available)
     header_text : str
     """
-    
+
     with open(path, "rb") as f:
         data_bytes = f.read()
 
@@ -194,8 +199,73 @@ def fit_gaussians(image, positions_init, window_size=5):
 
     return np.array(fitted_params)
 
+fft_top = "FP/STM/fft.top"
+image_fft, meta_fft, header_fft = load_wsxm_top(fft_top)
+image_fft = image_fft.astype(float)
+
+# Replace zeros with NaN to avoid false peaks
+image_fft[image_fft == 0] = np.nan
+
+# Find local maxima
+peaks = (image_fft == maximum_filter(image_fft, size=30))
+peaks &= (image_fft > np.nanpercentile(image_fft, 99.9))  # threshold to avoid noise
+
+# Label connected components and get center of mass
+lbl_fft, n_ff = label(peaks)
+positions_fft = np.array(center_of_mass(image_fft, lbl_fft, index=np.arange(1, n_ff+1)))
+
+rows_f, cols_f = meta_fft["rows"], meta_fft["cols"]
+x_f = np.linspace(-0.5 * meta_fft["x_amp"] / 1e9, 0.5 * meta_fft["x_amp"] / 1e9, cols_f)
+y_f = np.linspace(-0.5 * meta_fft["y_amp"] / 1e9, 0.5 * meta_fft["y_amp"] / 1e9, rows_f)
+
+# filter out the central peak by radius
+radii = np.sqrt((positions_fft[:, 1] - cols_f // 2)**2 + (positions_fft[:, 0] - rows_f // 2)**2)
+positions_fft = positions_fft[radii > 5]
+peak_x = x_f[0] + (positions_fft[:, 1]) * (x_f[1] - x_f[0])
+peak_y = y_f[0] + (positions_fft[:, 0]) * (y_f[1] - y_f[0])
+
+ang = (np.degrees(np.arctan2(peak_y, peak_x)) + 360) % 360
+ordr = np.argsort(ang); ang = ang[ordr]
+gaps = np.diff(np.r_[ang, ang[0] + 360])          # 6 gaps, should be ~60°
+print("sorted angles [deg]:", np.round(ang, 2))
+print("neighbor gaps [deg]:", np.round(gaps, 2))
+
+peak_x, peak_y = peak_x[ordr], peak_y[ordr]
+
+vals = []
+for i in range(6):
+    b1 = np.array([peak_x[i], peak_y[i]])
+    b2 = np.array([peak_x[(i+1)%6], peak_y[(i+1)%6]])
+    A = np.linalg.inv(np.column_stack([b1, b2])).T
+    a1, a2 = A[:,0], A[:,1]
+    a = np.linalg.norm(a1); b = np.linalg.norm(a2)
+    gamma = np.degrees(np.arccos(np.dot(a1,a2)/(a*b))); gamma = min(gamma, 180-gamma)
+    vals.append((a,b,gamma))
+
+vals = np.array(vals)
+for i,(a,b,g) in enumerate(vals[:3]):
+    a1, a2 = vals[i,0], vals[(i+3)%6,0]
+    b1, b2 = vals[i,1], vals[(i+3)%6,1]
+    g1, g2 = vals[i,2], vals[(i+3)%6,2]
+    print(f"a = ({print_round_val(np.mean([a1, a2]), np.std([a1, a2], ddof=1))})nm, \\quad  b = ({print_round_val(np.mean([b1, b2]), np.std([b1, b2], ddof=1))})nm,\\quad  \\gamma={print_round_val(np.mean([g1, g2]), np.std([g1, g2], ddof=1))}^\\circ")
 
 
+
+print('-'*40)
+
+
+fig_fft = plt.figure(figsize=(10, 10))
+im_fft = plt.imshow(image_fft*1e12/2, origin="lower", cmap="inferno", 
+                    extent=[x_f[0], x_f[-1], y_f[0], y_f[-1]])
+plt.colorbar(im_fft, label="FFT magnitude (pm)", shrink=0.7)
+plt.scatter(peak_x, peak_y, s=20, c="cyan", marker=".", label="Detected peaks")
+plt.title("FFT of 49f")
+plt.xlabel("$k_x (1/nm)$")
+plt.ylabel("$k_y (1/nm)$")
+plt.tight_layout()
+plt.legend()
+plt.savefig(Path(__file__).with_name("STM_fft_peaks.pdf"), dpi=300, transparent=True)
+plt.show()
 
 top_file = "FP/STM/blanko49f.top"
 image, meta, header = load_wsxm_top(top_file)
@@ -680,12 +750,6 @@ plt.xlabel(r"$k_x$ (cycles / nm)")
 plt.ylabel(r"$k_y$ (cycles / nm)")
 plt.title("2D FFT modulus of STM image")
 plt.tight_layout()
-
-
-
-
-
-
 
 
 plt.show()

@@ -1,4 +1,3 @@
-from matplotlib.pylab import f
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -45,7 +44,7 @@ def load_gwyddion_profiles(fname, sep=';'):
     return profiles
 
 
-fname = Path("FP/STM/Data/18fb.csv")  
+fname = Path("FP/STM/Data/8fb.csv")  
 profiles = load_gwyddion_profiles(fname, sep=';')
 print(f"Loaded {len(profiles)} profiles")
 
@@ -69,7 +68,7 @@ all_terraces = []
 
 for i in range(6):
     print(i)
-    fname = Path(f"FP/STM/Data/18fb{i+1}.csv")
+    fname = Path(f"FP/STM/Data/8fb{i+1}.csv")
     terraces = load_gwyddion_profiles(fname, sep=';')
     
     terrace = []

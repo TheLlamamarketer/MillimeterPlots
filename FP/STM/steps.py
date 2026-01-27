@@ -10,7 +10,6 @@ import glob
 import os
 import csv
 
-
 # ======================================================================
 # I/O: WSxM .top loader
 # ======================================================================
@@ -806,6 +805,7 @@ def analyze_top_file(
 if __name__ == "__main__":
 
     steps_dir   = "FP/STM/steps"
+    plots_dir   = "FP/STM/plots"
     cache_file  = os.path.join(steps_dir, "batch_results_cache.csv")
     top_files   = sorted(glob.glob(os.path.join(steps_dir, "*.top")))
 
@@ -851,8 +851,8 @@ if __name__ == "__main__":
             try:
                 res = analyze_top_file(
                     f,
-                    show_debug_plots=False,
-                    show_summary_plots=False,
+                    show_debug_plots=True,
+                    show_summary_plots=True,
                     averaging_radius=1,
                     verbose=True,
                 )
@@ -959,6 +959,7 @@ if __name__ == "__main__":
             for n in range(1, n_max + 1):
                 ax.axvline(n * h0_lit, linestyle=":", linewidth=0.8, alpha=0.5)
         ax.legend()
+        plt.savefig(os.path.join(plots_dir, "per_image_means_histogram.pdf"))
 
         # Right: all individual heights (combined distribution)
         ax = axes[1]
@@ -973,7 +974,7 @@ if __name__ == "__main__":
             for n in range(1, n_max + 1):
                 ax.axvline(n * h0_lit, linestyle=":", linewidth=0.8, alpha=0.5)
             ax.legend()
-
+        plt.savefig(os.path.join(plots_dir, "all_heights_combined_histogram.pdf"))
         fig.tight_layout()
 
         # ------------------------------------------------------------------
@@ -1004,7 +1005,7 @@ if __name__ == "__main__":
                 pass
 
             fig.tight_layout()
-
+            plt.savefig(os.path.join(plots_dir, "all_heights_per_image_boxplot.pdf"))
         # ------------------------------------------------------------------
         # Step height vs. image (means + weighted means)
         # ------------------------------------------------------------------
@@ -1024,6 +1025,7 @@ if __name__ == "__main__":
         plt.title("Step heights per image (column-logistic methods)")
         plt.legend()
         plt.tight_layout()
+        plt.savefig(os.path.join(plots_dir, "step_heights_per_image.pdf"))
 
         # ------------------------------------------------------------------
         # Same heights, sorted: spread + outliers
@@ -1053,7 +1055,7 @@ if __name__ == "__main__":
         plt.ylabel("Step height (nm)")
         plt.title("Column-logistic mean (sorted)")
         plt.tight_layout()
-
+        plt.savefig(os.path.join(plots_dir, "column_logistic_mean_sorted.pdf"))
         # ------------------------------------------------------------------
         # Consistency with integer multiples of h0 for the two methods
         # ------------------------------------------------------------------
@@ -1086,6 +1088,11 @@ if __name__ == "__main__":
             ax2.set_title(r"$h$ vs. $n \cdot h_0$")
 
             fig.tight_layout(rect=[0, 0, 1, 0.93])
+            plt.savefig(os.path.join(
+                plots_dir,
+                f"consistency_with_h0_{method_name.replace(' ', '_').lower()}.pdf"
+            ))
+            
 
         # ------------------------------------------------------------------
         # Global numbers you can quote in the report
@@ -1102,5 +1109,6 @@ if __name__ == "__main__":
                 f"All column heights combined: "
                 f"{mean_all:.4f} ± {stderr_all:.4f} nm (N = {all_heights_combined.size})"
             )
-
-        plt.show()
+            
+        plt.savefig(os.path.join(plots_dir, "combined_step_heights_summary.pdf"))
+        #plt.show()
