@@ -2,7 +2,11 @@ import numpy as np
 import pandas as pd
 from lmfit import Model
 from decimal import Decimal, getcontext
-import logging 
+import inspect
+from scipy.odr import ODR, Model as ODRModel, RealData
+
+
+
 getcontext().prec = 50
 
 def FirstSignificant(x):
@@ -99,10 +103,11 @@ def slope(xdata, ydata, yerr=None):
 
     return a, da, b, db, R2, variance
 
-def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constraints = None, initial_params=None, scale_covar=False):
+def lmfit(xdata, ydata, yerr=None, xerr=None, model: str | callable = "linear", constraints=None, initial_params=None, scale_covar=True, xerr_iter=2):
     """
     Fit data to a specified model: linear, quadratic, or exponential.
     - constraints: Dictionary of parameter constraints, e.g., {"a": 0}.
+    - xerr: optional uncertainty in x; used to inflate effective sigma via error propagation.
     """
 
     x = np.asarray(xdata, dtype=float)
@@ -120,17 +125,30 @@ def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constrain
                 yerr_arr = np.full_like(y, yerr_arr.item())
             else:
                 raise ValueError("yerr must have the same shape as ydata or be a single value.")
+
+    if xerr is None:
+        xerr_arr = None
+    else:
+        xerr_arr = np.asarray(xerr, dtype=float)
+        if xerr_arr.shape != x.shape:
+            if xerr_arr.size == 1:
+                xerr_arr = np.full_like(x, xerr_arr.item())
+            else:
+                raise ValueError("xerr must have the same shape as xdata or be a single value.")
     
     mask = ~np.isnan(x) & ~np.isnan(y) & np.isfinite(x) & np.isfinite(y)
     if yerr_arr is not None:
         mask &= ~np.isnan(yerr_arr) & np.isfinite(yerr_arr)
+    if xerr_arr is not None:
+        mask &= ~np.isnan(xerr_arr) & np.isfinite(xerr_arr)
     x, y = x[mask], y[mask]
     if yerr_arr is not None:
         yerr_arr = yerr_arr[mask]
+    if xerr_arr is not None:
+        xerr_arr = xerr_arr[mask]
 
     models = {
         "linear": (lambda x, a, b: a + b * x, {"a": 0, "b": 1}),
-        "quadratic": (lambda x, a, b, c: a + b * x + c * x**2, {"a": 0, "b": 1, "c": 1}),
         "exponential": (lambda x, a, b, c: a * np.exp(b * x) + c, {"a": np.max(y), "b": 0.2, "c": np.min(y)}),
         "exponential_decay": (lambda x, a, b, c: a * (1 - np.exp(-b * x + c)), {"a": np.max(y), "b": 0.7, "c": 0}),
         "gaussian": (lambda x, a, b, c, d: a * np.exp(-((x - b) / c)**2 / 2) + d, {"a": np.max(y), "b": np.mean(x), "c": 1, "d": np.min(y)})
@@ -147,8 +165,8 @@ def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constrain
         model_func = model
         init = initial_params if initial_params is not None else {}
         
-    mode_func = Model(model_func)
-    params = mode_func.make_params(**init)
+    model_func = Model(model_func)
+    params = model_func.make_params(**init)
 
     if constraints:
         for param, value in constraints.items():
@@ -159,14 +177,92 @@ def lmfit(xdata, ydata, yerr = None, model: str | callable = "linear", constrain
             else:
                 params[param].set(value=value, vary=False)
     
-    if yerr_arr is None:
-        return mode_func.fit(y, params, x=x, scale_covar=scale_covar)
-    
-    sigma_floor = 1e-12
-    yerr_arr = np.where(yerr_arr < sigma_floor, sigma_floor, yerr_arr)
-    weights = 1.0 / yerr_arr
+    if yerr_arr is None and xerr_arr is None:
+        return model_func.fit(y, params, x=x, scale_covar=scale_covar)
 
-    return mode_func.fit(y, params, x=x, weights=weights, scale_covar=scale_covar)
+    sigma_floor = 1e-12
+
+    def _effective_sigma(params_in):
+        sigma_y = yerr_arr if yerr_arr is not None else np.zeros_like(y)
+        sigma_y = np.where(sigma_y < sigma_floor, sigma_floor, sigma_y)
+
+        if xerr_arr is None:
+            return sigma_y
+
+        sigma_x = np.where(xerr_arr < sigma_floor, sigma_floor, xerr_arr)
+        dx = 1e-6 * (np.abs(x) + 1.0)
+        y0 = model_func.eval(params=params_in, x=x)
+        y1 = model_func.eval(params=params_in, x=x + dx)
+        dy_dx = (y1 - y0) / dx
+        return np.sqrt(sigma_y ** 2 + (dy_dx * sigma_x) ** 2)
+
+    if xerr_arr is None:
+        yerr_arr = np.where(yerr_arr < sigma_floor, sigma_floor, yerr_arr)
+        weights = 1.0 / yerr_arr
+        return model_func.fit(y, params, x=x, weights=weights, scale_covar=scale_covar)
+
+    # Iterate to account for x-uncertainty affecting effective sigma.
+    result = None
+    params_in = params
+    n_iter = max(1, int(xerr_iter))
+    for _ in range(n_iter):
+        sigma_eff = _effective_sigma(params_in)
+        weights = 1.0 / sigma_eff
+        result = model_func.fit(y, params_in, x=x, weights=weights, scale_covar=scale_covar)
+        params_in = result.params
+
+    return result
+
+
+
+def odr_fit(func, x, y, sx, sy, init_params: dict, constraints=None):
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+
+    # Parameter order from function signature: (x, a, b, c, ...)
+    sig = inspect.signature(func)   
+    names = list(sig.parameters.keys())[1:]
+
+    # Apply constraints: fixed values
+    fixed = {}
+    if constraints:
+        for k, v in constraints.items():
+            if v is None:
+                continue
+            if isinstance(v, dict):
+                if "value" in v and v.get("vary", True) is False:
+                    fixed[k] = float(v["value"])
+            else:
+                fixed[k] = float(v)
+
+    vary_names = [n for n in names if n not in fixed]
+    beta0 = np.array([init_params[n] for n in vary_names], float)
+
+    def f_odr(beta, x_in):
+        vals = dict(fixed)
+        vals.update({n: b for n, b in zip(vary_names, beta)})
+        args = [vals[n] for n in names]
+        return func(x_in, *args)
+
+    data = RealData(x, y, sx=sx, sy=sy)
+    model = ODRModel(f_odr)
+    out = ODR(data, model, beta0=beta0).run()
+
+    # Build a friendly result dict
+    best = dict(fixed)
+    best.update({n: v for n, v in zip(vary_names, out.beta)})
+
+    # cov_beta is not scaled by res_var, sd_beta is scaled
+    cov_scaled = out.cov_beta * out.res_var
+
+    return {
+        "params": best,
+        "beta": out.beta,
+        "sd_beta": out.sd_beta,
+        "cov_beta_scaled": cov_scaled,
+        "res_var": out.res_var,
+        "out": out,
+    }
 
 def calc_CI(result, xdata, sigmas=(1,)):
     """

@@ -1,8 +1,9 @@
 from calendar import c
 from wsgiref import headers
+from matplotlib.pylab import f
 import numpy as np
 from decimal import Decimal
-from scipy import constants
+from scipy import constants, odr
 
 import sys
 from pathlib import Path
@@ -45,7 +46,7 @@ data2.update({'Intensity': Intensity, 'dIntensity': dIntensity, 'Baseline': Base
 
 
 init = {'a':5, 'c':90, 'd':0.01}
-results = lmfit(data2['Angle'], data2['Intensity'], model=cos2, initial_params=init, yerr=data2['dIntensity'])
+results = lmfit(data2['Angle'], data2['Intensity'], model=cos2, initial_params=init, yerr=data2['dIntensity'],xerr=data2['dAngle'])
 
 fitx = np.linspace(0, 200, 500)
 
@@ -80,15 +81,14 @@ print_standard_table(
 )
 
 
-L = 4.13e-3
-T1 = 6.5e-6
-dT1 = 0.05e-6
-T2 = 2.26e-6
-dT2 = 0.05e-6
+I0 = 4.13e-3
+IS1 = 6.5e-6
+dIS1 = 0.05e-6
+IS2 = 2.26e-6
+dIS2 = 0.05e-6
 
-
-print(f"$T1 = {print_round_val(T1/L*100, dT1/L*100)} \\%$")
-print(f"$T2 = {print_round_val(T2/L*100, dT2/L*100)} \\%$")
+print(f"$T1 = {print_round_val(IS1/I0*100, dIS1/I0*100)} \\%$")
+print(f"$T2 = {print_round_val(IS2/I0*100, dIS2/I0*100)} \\%$")
 print('-'*40)
 
 # Task 6
@@ -113,7 +113,7 @@ Intensity6 = Intensity6 *max(Baseline6)/Baseline6
 data6.update({'Intensity': Intensity6, 'dIntensity': dIntensity6, 'Baseline': Baseline6, 'dAngle': data6['dAngle']*np.ones_like(data6['Angle'])})
 
 initcos6 = {'a':0.1, 'c':170, 'd':0.001}
-results6 = lmfit(data6['Angle'], data6['Intensity'], model=cos2, initial_params=initcos6, yerr=data6['dIntensity'])
+results6 = lmfit(data6['Angle'], data6['Intensity'], model=cos2, initial_params=initcos6, yerr=data6['dIntensity'], xerr=data6['dAngle'])
 
 
 s6 = DatasetSpec(
@@ -143,7 +143,7 @@ print_standard_table(
     headers=headers6,
     caption="Gemessene Winkelabhängigkeit von Messlaserintensität durch ein Polarisationsfilter. Die Intensitätswerte wurden mit den Basiswerten normalisiert (also mit dem Verhältnis $\\mathrm{max(Basis)}/\\mathrm{Basis}$ multipliziert).",
     label="tab:A6",
-    show=True
+    show=False
 )
 
 
@@ -200,7 +200,7 @@ S2 = (26.5 + 32.45)/2
 
 data7 = {
     'Position': np.array([76, 76.5, 77, 77.5, 78, 78.5, 79, 79.5, 80, 80.5, 81, 81.5, 82, 82.5, 82, 81.5, 81, 80.5, 80, 79, 76.5]),
-    'dPosition': 0.1*np.sqrt(2)+0.1,
+    'dPosition': np.sqrt(0.1**2 + 0.4**2),  # error of S1 measurement (0.1 cm) and error of S2 position (0.4 cm)              
     'Intensity': [89.3, 105, 91.5, 69.5, 73.3, "59.0", "53.0","20.0", 2.70, "3.00", "2.10", 2.23, 2.13, 2.15, 2.14, 2.12, 2.07, "2.10", 11.2, 13.5, 66.6],
     'dIntensity': np.array([0.3, 0.3, 0.2, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.2, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.3, 0.2, 0.3]),
 }
@@ -215,13 +215,14 @@ data7.update({'dPosition': np.array(data7['dPosition'] * np.ones_like(data7['Pos
 
 hinge = lambda x, m, L0, Pbg: Pbg + np.maximum(0.0, m*(L0 - x))
 
-results7 = lmfit(data7['Position'][mask], data7['Intensity'][mask], model=hinge, initial_params={'m':23, 'L0':51, 'Pbg':2.2})
+results7 = lmfit(data7['Position'][mask], data7['Intensity'][mask], model=hinge, initial_params={'m':23, 'L0':51, 'Pbg':2.2}, yerr=data7['dIntensity'][mask], xerr=data7['dPosition'][mask], xerr_iter=10, scale_covar=True)
 
 print('-'*40)
 print("Original transmission values:")
-print(f"$T_1 = {T1} \\, \\mu W$, $T_2 = {T2} \\, \\mu W$")
-print(f"new transmission values with pbg subtracted: $I_{{S1}} = {print_round_val(T1*1e6 - results7.params['Pbg'].value, results7.params['Pbg'].stderr)} \\, \\mu W$, $I_{{S2}} = {print_round_val(T2*1e6 - results7.params['Pbg'].value, results7.params['Pbg'].stderr)} \\, \\mu W$")
-print(f"new Transmission percentages: $T_1 = {print_round_val((T1*1e6 - results7.params['Pbg'].value)/I*100*1e-6)} \\, \\%$, $T_2 = {print_round_val((T2*1e6 - results7.params['Pbg'].value)/I*100*1e-6)} \\, \\%$")
+print(f"$I_{{S1}} = {print_round_val(IS1*1e6, dIS1*1e6, intermed=False)} \\, \\mu W$, $I_{{S2}} = {print_round_val(IS2*1e6, dIS2*1e6, intermed=False)} \\, \\mu W$")
+print(f"Background intensity: $I_{{bg}} = {print_round_val(results7.params['Pbg'].value, results7.params['Pbg'].stderr)} \\, \\mu W$")
+print(f"new transmission values with pbg subtracted: $I_{{S1}} = {print_round_val(IS1*1e6 - results7.params['Pbg'].value, np.sqrt(results7.params['Pbg'].stderr**2 + (dIS1*1e6)**2))} \\, \\mu W$, $I_{{S2}} = {print_round_val(IS2*1e6 - results7.params['Pbg'].value, np.sqrt(results7.params['Pbg'].stderr**2 + (dIS2*1e6)**2))} \\, \\mu W$")
+print(f"new Transmission percentages: $T_1 = {print_round_val((IS1*1e6 - results7.params['Pbg'].value)/I0*100*1e-6, np.sqrt(results7.params['Pbg'].stderr**2 + (dIS1*1e6)**2)/I0*100*1e-6)} \\, \\%$, $T_2 = {print_round_val((IS2*1e6 - results7.params['Pbg'].value)/I0*100*1e-6, np.sqrt(results7.params['Pbg'].stderr**2 + (dIS2*1e6)**2)/I0*100*1e-6)} \\, \\%$")
 print('-'*40)
 
 fit_pos = results7.eval(x=data7['Position'][mask])
@@ -231,8 +232,6 @@ sigma = np.sqrt(1/(len(data7['Position'][mask]) - len(results7.params)) * np.sum
 print(f"sigma: {sigma}")
 
 fitx = np.linspace(data7['Position'].min(), data7['Position'].max(), 400)
-
-
 
 
 
@@ -269,7 +268,7 @@ plot_data(
 print_standard_table(
     data=data7,
     headers=headers7,
-    caption="Gemessene Abhängigkeit der Lichtintensität von der Kavitätslänge.",
+    caption="Gemessene Abhängigkeit der Lichtintensität von der Resonatorlänge $L$.",
     label="tab:A7",
     show=True)
 
@@ -278,7 +277,7 @@ print_standard_table(
 
 data9 = {
     'Position': np.array([76.5, 77.5, 78.5, 79.5]),
-    'dPosition': [0.4],
+    'dPosition': [0.5],
     'delta': np.array([468e-6, 460e-6, 436e-6, 440e-6]),
     'fwhm1': np.array([32e-6, 36e-6, 36e-6, 40e-6]),
     'fwhm2': np.array([36e-6, 36e-6, 40e-6, 40e-6])
@@ -296,32 +295,47 @@ freq_err = freq * np.sqrt( (delta_err/data9['delta'])**2 + (v_FSR_mode_err/v_FSR
 
 fitx = np.linspace(data9['Position'].min(), data9['Position'].max(), 50)
 
-results9 = lmfit(1/data9['Position'], freq, yerr=freq_err, model=lambda x, a: constants.c/2 * a * x,
-               initial_params={'a':1})
+results9 = lmfit(1/data9['Position'], freq/1e6, yerr=freq_err/1e6, model=lambda x, a: constants.c/2 * a * x,
+               initial_params={'a':1}, xerr=(data9['dPosition']/data9['Position']**2), scale_covar=False)
 
-s9 = DatasetSpec(x=1/data9['Position'], y=freq,
-                yerr=freq_err, xerr=(data9['dPosition']/data9['Position']**2),
+resuls9_odr = odr_fit(lambda x, a: constants.c/2 * a * x, 1/data9['Position'], freq, sx=(data9['dPosition']/data9['Position']**2), sy=freq_err, init_params={'a':1})  
+
+results11 = lmfit(1/data9['Position'], freq/1e6, yerr=freq_err/1e6, model=lambda x, a, b: constants.c/2 * a * x + b,
+               initial_params={'a':1, 'b':0}, xerr=(data9['dPosition']/data9['Position']**2), scale_covar=True)
+
+print('-'*40)
+print("ODR Fit Results for Task 9:")
+print(f"$a = {print_round_val(resuls9_odr['beta'][0], resuls9_odr['sd_beta'][0])}$")
+print(f"R^2 = {resuls9_odr['res_var']}")
+
+print('-'*40)
+
+s9 = DatasetSpec(x=1/data9['Position'], y=freq/1e6,
+                yerr=freq_err/1e6, xerr=(data9['dPosition']/data9['Position']**2),
                 label="Gemessene Daten", fit_y=results9.eval(x=1/fitx), fit_x=1/fitx,
                 confidence=calc_CI(results9, 1/fitx, sigmas=(1,))
 )
 
 headers9 = {
-    'Position':     {'label': '{Position (cm)}', 'intermed': False, 'err': data9['dPosition']*100, 'data': data9['Position']*100},
+    'Position':     {'label': '{Resonator $L$ (cm)}', 'intermed': False, 'err': data9['dPosition']*100, 'data': data9['Position']*100},
     'delta': {'label': '{$\\Delta t_{FSR} (\\mu s)$}', 'intermed': True, 'err': delta_err*1e6, 'data': data9['delta']*1e6},
     'Frequency': {'label': '{$\\nu_{FSR}$ (MHz)}', 'intermed': True, 'err': freq_err*1e-6, 'data': freq*1e-6},
 }
-s10 = DatasetSpec(x=1/fitx, y=constants.c/2 * (1/fitx), label="Theoretische Vorhersage", line='--', marker='None')
+s10 = DatasetSpec(x=1/fitx, y=constants.c/2 * (1/fitx)/1e6, label="Theoretische Vorhersage", line='--', marker='None')
 
 print(results9.fit_report())
 print('-'*40)
-print(f"$a = {print_round_val(results9.params['a'].value, results9.params['a'].stderr)} \\, Hz\\,m$")
+print(f"$a = {print_round_val(results9.params['a'].value*1e6, results9.params['a'].stderr*1e6)} \\, Hz\\,m$")
+print(f"$a_2 = {print_round_val(results11.params['a'].value*1e6, results11.params['a'].stderr*1e6)}$, $b = {print_round_val(results11.params['b'].value, results11.params['b'].stderr)}$")
 print('-'*40)
 
+s11 = DatasetSpec(x=1/fitx, y=results11.params['a'].value*constants.c/2 * (1/fitx)+ results11.params['b'].value, label="Fit mit Offset", line='-.', marker='None')
+
 plot_data(
-    [s9, s10],
+    [s9, s10, s11],
     title="Longitudinaler Modenabstand in Abhängigkeit von $1/L$",
     xlabel="$1/L$ (1/m)",
-    ylabel="$\\nu_{FSR}$ (Hz)",
+    ylabel="$\\nu_{FSR}$ (MHz)",
     filename=repo_root / "FP" / "Laser" / "A9.pdf",
     plot=False
 )
@@ -329,7 +343,7 @@ plot_data(
 print_standard_table(
     data=data9,
     headers=headers9,
-    caption="Gemessene Frequenzabweichung in Abhängigkeit der Position der Spiegel.",
+    caption="Gemessene Frequenzabweichung in Abhängigkeit von der Resonatorlänge des Lasers.",
     label="tab:A9",
     show=True
 )
