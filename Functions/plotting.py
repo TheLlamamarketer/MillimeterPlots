@@ -53,10 +53,14 @@ class DatasetSpec:
     # drawing
     marker: str = "."                      # "o", "s", "D", "X", "P", ".", "v", "^", "<", ">"
     line: str = "None"                     # "-", "--", ":", "None"
-    linewidth: float = 1.4
+    linewidth: float = 1.0
     markersize: float = 24
     alpha: float = 0.95
     zorder: int = 3
+    
+    # plot type (for future extension, e.g. "bar", "scatter", etc.). For now, all are "line" (markers+lines).
+    plot_style: str = "linear"  # "linear" (default), "bar", "scatter", etc.
+    barwidth: float = 0.8      # only for plot_style="bar"
 
     # error bars (sym or asym). Each can be scalar, array, or (lower, upper)
     yerr: float | Sequence[float] | Tuple[Sequence[float], Sequence[float]] | Tuple[float, float] | None = None
@@ -446,6 +450,81 @@ def apply_si_format(
     y_lbl = _ensure_unit(ax.get_ylabel(), yunit)
     if y_lbl is not None:
         ax.set_ylabel(y_lbl)
+
+
+# Helper function to dispatch plot based on style
+def _plot_series_data(
+    ax: Axes,
+    s: DatasetSpec,
+    x: np.ndarray,
+    y: np.ndarray,
+    color: str,
+    oc: str,
+    outline: bool,
+    outline_width: float,
+) -> None:
+    """Plot a single series based on plot_style.
+    
+    Handles the actual plotting (errorbar/scatter/line vs bar) and returns nothing.
+    This is called from within the loop over specs in plot_data.
+    """
+    xerr_lower, xerr_upper = _normalize_err(s.xerr, x)
+    yerr_lower, yerr_upper = _normalize_err(s.yerr, y)
+
+    if s.plot_style == "bar":
+        # Bar plot: x is positions (0, 1, 2, ...) or categorical labels
+        yerr = None 
+        if s.yerr is not None:
+            yerr = [np.abs(yerr_lower), np.abs(yerr_upper)]
+        
+        bars = ax.bar(
+            x, y,
+            color=color,
+            alpha=s.alpha,
+            zorder=s.zorder + 1,
+            width=s.barwidth,
+            label=s.label,
+            edgecolor=(oc if outline else None),
+            linewidth=(outline_width if outline else None),
+            yerr=yerr,
+            capsize=5 if s.yerr is not None else 0,
+            error_kw={"elinewidth": 0.9, "capthick": 0.9}
+        )
+        
+        if outline:
+            for bar in bars:
+                bar.set_path_effects([
+                    pe.Stroke(linewidth=outline_width, foreground=oc),
+                    pe.Normal(),
+                ])
+    else:
+        # "linear" (default): scatter + line plot
+        if s.xerr is not None or s.yerr is not None:
+            eb = ax.errorbar(
+                x, y,
+                xerr=None if s.xerr is None else [np.abs(xerr_lower), np.abs(xerr_upper)],
+                yerr=None if s.yerr is None else [np.abs(yerr_lower), np.abs(yerr_upper)],
+                fmt=s.marker if s.marker != "None" else "o",
+                markeredgecolor=(oc if outline else None) if not s.marker == "x" else None,
+                color=color, ecolor=color, elinewidth=0.9, capsize=3, capthick=0.9, linestyle=s.line,
+                markersize=max(4, s.markersize / 3), alpha=s.alpha, zorder=s.zorder+1,
+                label=s.label)
+            if outline:
+                for art in eb.lines + eb.caplines:  # type: ignore[attr-defined]
+                    art.set_path_effects([
+                        pe.Stroke(linewidth=art.get_linewidth()+outline_width, foreground=oc), pe.Normal()
+                    ])
+        else:
+            if s.marker != "None":
+                sc = ax.scatter(x, y, color=color, marker=s.marker, s=s.markersize, alpha=s.alpha, zorder=s.zorder+1,
+                                label=s.label, edgecolors=(oc if outline else None), linewidths=(outline_width if outline else None))
+            if s.line != "None":
+                line_main, = ax.plot(x, y, linestyle=s.line, color=color, linewidth=s.linewidth, zorder=s.zorder+1,
+                                    label=None if s.marker != "None" else s.label)
+                if outline:
+                    line_main.set_path_effects([
+                        pe.Stroke(linewidth=line_main.get_linewidth()+outline_width, foreground=oc), pe.Normal()
+                    ])
 
 
 # -----------------------------------------------------------------------------
@@ -845,35 +924,8 @@ def plot_data(
                 x, y = pts[:, 0], pts[:, 1]
                 s.markersize = s.markersize + 87 * (np.log(counts) / np.log1p(counts).max())
 
-            xerr_lower, xerr_upper = _normalize_err(s.xerr, x)
-            yerr_lower, yerr_upper = _normalize_err(s.yerr, y)
-
-            if s.xerr is not None or s.yerr is not None:
-                eb = ax.errorbar(
-                    x, y,
-                    xerr=None if s.xerr is None else [np.abs(xerr_lower), np.abs(xerr_upper)],
-                    yerr=None if s.yerr is None else [np.abs(yerr_lower), np.abs(yerr_upper)],
-                    fmt=s.marker if s.marker != "None" else "o",
-                    markeredgecolor=(oc if outline else None) if not s.marker == "x" else None,
-                    color=color, ecolor=color, elinewidth=0.9, capsize=3, capthick=0.9, linestyle=s.line,
-                    markersize=max(4, s.markersize / 3), alpha=s.alpha, zorder=s.zorder+1,
-                    label=s.label)
-                if outline:
-                    for art in eb.lines + eb.caplines: # type: ignore[attr-defined]
-                        art.set_path_effects([
-                            pe.Stroke(linewidth=art.get_linewidth()+outline_width, foreground=oc), pe.Normal()
-                        ])
-            else:
-                if s.marker != "None":
-                    sc = ax.scatter(x, y, color=color, marker=s.marker, s=s.markersize, alpha=s.alpha, zorder=s.zorder+1,
-                                    label=s.label, edgecolors=(oc if outline else None), linewidths=(outline_width if outline else None))
-                if s.line != "None":
-                    line_main, = ax.plot(x, y, linestyle=s.line, color=color, linewidth=s.linewidth, zorder=s.zorder+1,
-                                        label=None if s.marker != "None" else s.label)
-                    if outline:
-                        line_main.set_path_effects([
-                            pe.Stroke(linewidth=line_main.get_linewidth()+outline_width, foreground=oc), pe.Normal()
-                        ])
+            # Dispatch to appropriate plotting function based on plot_style
+            _plot_series_data(ax, s, x, y, color, oc, outline, outline_width)
 
         # Labels & title
         if xlabel:
