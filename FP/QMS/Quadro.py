@@ -1,13 +1,12 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks, savgol_filter
+from scipy.signal import find_peaks, savgol_filter, peak_widths, peak_prominences
 
 from pathlib import Path
 import sys 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from FP.Laser import plot
 from Functions.plotting import *
 from Functions.tables import *
 from Functions.help import *
@@ -45,7 +44,7 @@ for name, d, pressure in zip(names, data, pressures):
     if 'Air_U' in name:
         category = 'voltage_run'
     elif 'Air_s' in name:
-        category = 'accuracy_run'
+        category = 'resolution_run'
     else:
         category = 'molecules_run'
     
@@ -54,7 +53,7 @@ for name, d, pressure in zip(names, data, pressures):
     runs[category]["pressure"].append(pressure)
 
 voltage_run = runs['voltage_run']
-accuracy_run = runs['accuracy_run']
+resolution_run = runs['resolution_run']
 molecules_run = runs['molecules_run']
 
 sorting = np.argsort([int(name[5:]) for name in voltage_run['name']])[::-1]
@@ -62,17 +61,71 @@ voltage_run['name'] = [voltage_run['name'][i] for i in sorting]
 voltage_run['data'] = [voltage_run['data'][i] for i in sorting]
 voltage_run['pressure'] = [voltage_run['pressure'][i] for i in sorting]
 
+U_FR = 113.4
+U_FA = np.array([110.8, 90.10, 69.95, 50.003, 29.973, 9.973]) 
 
-sU = []
-for i, (name, d, pressure) in enumerate(zip(voltage_run['name'][1:], voltage_run['data'][1:], voltage_run['pressure'][1:])):
+
+U_B = U_FR - U_FA
+
+sU, s_peaks = [], []
+for i, (name, d, pressure) in enumerate(zip(voltage_run['name'][:], voltage_run['data'][:], voltage_run['pressure'][:])):
     mr, s = d
     b0 = np.quantile(s, 0.1)
     s -= b0
-    color = plt.cm.plasma(i / len(voltage_run['name'][1:])) # all colormaps are: plasma, viridis, inferno, magma, cividis
-    sU.append(DatasetSpec(x=mr, y=s, label=f'U={name[5:]} V', line='-', marker='None', color=color))
+    color = plt.cm.plasma(i / len(voltage_run['name'][:])) # all colormaps are: plasma, viridis, inferno, magma, cividis
+    sU.append(DatasetSpec(x=mr, y=s, label=f'$U_B = {U_B[i]:.2f} V$', line='-', marker='None', color=color, linewidth=0.5))
     
+    peaks, props = find_peaks(s, prominence=5, distance=30, height=2.0)
+    
+    if peaks.size > 2:
+        top2_idx = np.argsort(s[peaks])[-2:]
+        peaks = peaks[top2_idx]
+        props = {key: val[top2_idx] for key, val in props.items()}
+
+    # FWHM
+    widths_idx, width_heights, left_ips, right_ips = peak_widths(s, peaks, rel_height=0.5)
+    idx = np.arange(s.size)
+    m_left  = np.interp(left_ips,  idx, mr)
+    m_right = np.interp(right_ips, idx, mr)
+
+    mr_peaks = mr[peaks]
+    signal_peaks = s[peaks]
+    delta = m_right - m_left
+    res = mr_peaks / delta
+    
+    print(f"Run: {name}, Peaks at m/z: {mr_peaks}, FWHM: {delta}, Resolution: {res}")
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(mr, s, label="Signal")
+    ax.plot(mr_peaks, signal_peaks, "x", markersize=12, label="Peaks")
+
+    # FWHM graphics
+    for k in range(peaks.size):
+        ax.hlines(width_heights[k], m_left[k], m_right[k], linewidth=2, label="FWHM" if k == 0 else None)
+        ax.vlines([m_left[k], m_right[k]], ymin=width_heights[k] - 0.5, ymax=width_heights[k] + 0.5,
+                linestyles="dotted", linewidth=1, label="Width edges" if k == 0 else None)
+    
+    if "prominences" in props:
+        prom = props["prominences"]
+        lb = props["left_bases"]
+        rb = props["right_bases"]
+
+        # contour line height used for prominence
+        y0 = s[peaks] - prom
+
+        for k, p in enumerate(peaks):
+            ax.vlines(mr[p], y0[k], s[p], lw=2, alpha=0.7, label="Prominence" if k == 0 else None)
+    ax.set_xlabel(r"Massenladungszahl ($m/z$)")
+    ax.set_ylabel("Signalstärke (arb. Einheiten)")
+    ax.legend()
+    plt.close()
+
+    
+    s_peaks.append(DatasetSpec(x=mr_peaks, y=signal_peaks, line='None', marker='x', color='red', markersize=12))
+
+
 plot_data(
-    sU,
+    sU + s_peaks,
     filename='Plots/voltage_run.pdf',
     title='Signalstärke bei verschiedenen Spannungen',
     xlabel='Massenladungszahl ($m/z$)',
@@ -87,22 +140,31 @@ plot_data(
 
 
 
-sorting_acc = np.argsort([int(name[5]) for name in accuracy_run['name']])
-accuracy_run['name'] = [accuracy_run['name'][i] for i in sorting_acc]
-accuracy_run['data'] = [accuracy_run['data'][i] for i in sorting_acc]
-accuracy_run['pressure'] = [accuracy_run['pressure'][i] for i in sorting_acc]
+sorting_res = np.argsort([int(name[5]) for name in resolution_run['name']])
+resolution_run['name'] = [resolution_run['name'][i] for i in sorting_res]
+resolution_run['data'] = [resolution_run['data'][i] for i in sorting_res]
+resolution_run['pressure'] = [resolution_run['pressure'][i] for i in sorting_res]
 
 
-s_acc = []
-for name, d, pressure in zip(accuracy_run['name'], accuracy_run['data'], accuracy_run['pressure']):
+s_res, s_peaks = [], []
+for name, d, pressure in zip(resolution_run['name'], resolution_run['data'], resolution_run['pressure']):
     mr, s = d
     b0 = np.quantile(s, 0.1)
     s -= b0
-    s_acc.append(DatasetSpec(x=mr, y=s, label=f'Acc={name[5]}', line='-', marker='None'))
+    
+    peaks, props = find_peaks(s, prominence=0.8*np.sqrt(max(s)), distance=30)
+    mr_peaks = mr[peaks]
+    signal_peaks = s[peaks]
+    
+    width_samples, height_eval, left_ips, right_ips = peak_widths(s, peaks, rel_height=0.5)
+    
+    color = plt.cm.viridis(int(name[5])*10 / 100) # all colormaps are: plasma, viridis, inferno, magma, cividis
+    s_res.append(DatasetSpec(x=mr, y=s, label=f'$Res = {name[5]}$', line='-', marker='None', color=color, linewidth=0.5))
+    s_peaks.append(DatasetSpec(x=mr_peaks, y=signal_peaks, line='None', marker='x', color='red', markersize=12))
 
 plot_data(
-    s_acc,
-    filename='Plots/accuracy_run.pdf',
+    s_res + s_peaks,
+    filename='Plots/resolution_run.pdf',
     title='Signalstärke bei verschiedenen Genauigkeiten',
     xlabel='Massenladungszahl ($m/z$)',
     ylabel='Signalstärke (arb. Einheiten)',
@@ -151,18 +213,21 @@ for name, d, pressure in zip(molecules_run['name'], molecules_run['data'], molec
     mask2 = s > 0
     s = s[mask2]
     mr = mr[mask2]
-    s /= max(s)
-    s*=100
-    
     s_filtered = savgol_filter(s, 31, 3)
+    
+    s/= max(s_filtered) /100
+    s_filtered /= max(s_filtered)/100
+    
+    
+    
     peaks, _ = find_peaks(s_filtered, prominence=5, distance=30)
     mr_peaks = mr[peaks]
     s_filtered_peaks = s_filtered[peaks]
         
     s_theory = DatasetSpec(x=data[name_mol]['mz']-0.1, y=data[name_mol]['s'], label=f'${name_mol}$ Theorie', color='tab:purple', plot_style='bar', barwidth=0.2)
-    s_mol= DatasetSpec(x=mr, y=s, label=f"${name_mol}$", line='-', marker='None',color='tab:green', fit_y=s_filtered, fit_x=mr, fit_label=f'${name_mol}$ Fit', fit_color='tab:blue')
+    s_mol= DatasetSpec(x=mr, y=s, label=f"${name_mol}$", line='-', marker='None',color='tab:green', fit_y=s_filtered, fit_x=mr, fit_label=f'${name_mol}$ Fit', fit_color='tab:blue', linewidth=0.5)
     s_peaks = DatasetSpec(x=mr_peaks, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', line='None', marker='x', color='tab:red', markersize=24)
-    s_peaks_bar = DatasetSpec(x=np.astype(mr_peaks, int)+0.1, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', plot_style='bar', barwidth=0.2)
+    s_peaks_bar = DatasetSpec(x=np.rint(mr_peaks).astype(int)+0.1, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', plot_style='bar', barwidth=0.2)
 
     plot_data(
         [s_theory, s_peaks_bar, s_mol, s_peaks],
