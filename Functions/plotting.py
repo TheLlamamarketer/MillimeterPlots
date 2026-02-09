@@ -745,10 +745,17 @@ def plot_data(
                 # Normalize colors, labels and intervals so behavior is predictable
                 n_lines = len(s.axlines)
 
-                # colors: single string -> use for all; iterable -> per-line, fallback to series color
+                # colors: single string or RGB(A) -> use for all; iterable -> per-line, fallback to series color
+                def _is_rgb_like(val: Any) -> bool:
+                    if isinstance(val, np.ndarray):
+                        return val.ndim == 1 and val.size in (3, 4) and np.issubdtype(val.dtype, np.number)
+                    if isinstance(val, (list, tuple)) and len(val) in (3, 4):
+                        return all(isinstance(c, (int, float, np.floating)) for c in val)
+                    return False
+
                 if s.axlines_color is None:
                     al_colors = [color] * n_lines
-                elif isinstance(s.axlines_color, str):
+                elif isinstance(s.axlines_color, str) or _is_rgb_like(s.axlines_color):
                     al_colors = [s.axlines_color] * n_lines
                 else:
                     al_colors = list(s.axlines_color)
@@ -779,10 +786,16 @@ def plot_data(
                 if s.axlines_intervals is None:
                     al_intervals = [None] * n_lines
                 elif isinstance(s.axlines_intervals, (list, tuple)):
-                    if len(s.axlines_intervals) == 2:
+                    is_interval_list = (
+                        len(s.axlines_intervals) > 0
+                        and all(isinstance(it, (list, tuple)) and len(it) == 2 for it in s.axlines_intervals)
+                    )
+                    if is_interval_list:
+                        al_intervals = list(s.axlines_intervals)
+                        if len(al_intervals) < n_lines:
+                            al_intervals += [None] * (n_lines - len(al_intervals))
+                    elif len(s.axlines_intervals) == 2:
                         al_intervals = [s.axlines_intervals] * n_lines
-                    elif len(s.axlines_intervals) < n_lines:
-                        al_intervals += [None] * (n_lines - len(al_intervals))
                     else:
                         al_intervals = list(s.axlines_intervals)
 
