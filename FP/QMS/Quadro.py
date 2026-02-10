@@ -387,11 +387,17 @@ for data in resolution_data:
         fit_y = results.eval(x=fit_mr)
         
         # Store fit parameters for table
+        residuals = results.residual
+        sigma = np.std(residuals)
+        
         fit_results_by_res[res_value] = {
             'masses': masses_arr,
             'delta_m': delta_m_arr,
-            'intercept': results.params['a'].value,  # y-intercept
-            'slope': results.params['b'].value,  # slope = Δm/m
+            'intercept': results.params['a'].value,
+            'intercept_err': results.params['a'].stderr if results.params['a'].stderr else 0,
+            'slope': results.params['b'].value,
+            'slope_err': results.params['b'].stderr if results.params['b'].stderr else 0,
+            'sigma': sigma,
             'r_squared': 1 - results.residual.var() / np.var(delta_m_arr) if np.var(delta_m_arr) > 0 else 0
         }
         
@@ -411,7 +417,10 @@ for data in resolution_data:
             'masses': masses_arr,
             'delta_m': delta_m_arr,
             'intercept': None,
+            'intercept_err': None,
             'slope': None,
+            'slope_err': None,
+            'sigma': None,
             'r_squared': None
         }
         s_mass.append(DatasetSpec(
@@ -473,30 +482,47 @@ print_standard_table(
     show=True
 )
 
-# Second table: Fit parameters (intercept, slope and R²)
+# Second table: Fit parameters (intercept, slope, errors, sigma, and R²)
 data_fit = {
     'resolution': sorted(fit_results_by_res.keys()),
     'intercept': [fit_results_by_res[res]['intercept'] for res in sorted(fit_results_by_res.keys())],
+    'intercept_err': [fit_results_by_res[res]['intercept_err'] for res in sorted(fit_results_by_res.keys())],
     'slope': [fit_results_by_res[res]['slope'] for res in sorted(fit_results_by_res.keys())],
+    'slope_err': [fit_results_by_res[res]['slope_err'] for res in sorted(fit_results_by_res.keys())],
+    'sigma': [fit_results_by_res[res]['sigma'] for res in sorted(fit_results_by_res.keys())],
     'r_squared': [fit_results_by_res[res]['r_squared'] for res in sorted(fit_results_by_res.keys())],
 }
 
 headers_fit = {
     'resolution': {'label': '{Auflösung}', 'intermed': True, 'round': False},
-    'intercept': {'label': '{$a_0$ (Achsenabschnitt)}', 'intermed': True},
-    'slope': {'label': '{$\\Delta m/m$}', 'intermed': True},
+    'intercept': {'label': '{$a$}', 'intermed': True, 'err': data_fit['intercept_err']},
+    'slope': {'label': '{$b$}', 'intermed': True, 'err': data_fit['slope_err']},
+    'sigma': {'label': '{$\\sigma_{res}$}', 'intermed': True},
     'r_squared': {'label': '{$R^2$}', 'intermed': True},
 }
 
 print_standard_table(
     data_fit,
     headers=headers_fit,
-    caption="Lineare Fit-Parameter für verschiedene Auflösungen.",
+    caption="Lineare Fit-Parameter der Beziehung $\Delta m = a + b\,m$ für verschiedene Auflösungen. Hier entspricht $b$ der Steigung (in erster Näherung $\Delta m/m$), $a$ ist ein massenunabhängiger Offset.",
     label="tab:resolution_fit",
     show=True
 )
 
 
+
+
+
+def shift_to_28(mr, y_smooth, lo=27.4, hi=28.6, target=28.0):
+    """Shift mr so that the local maximum in [lo, hi] lands at target."""
+    w = (mr >= lo) & (mr <= hi)
+    if not np.any(w):
+        return mr, 0.0
+
+    idx = np.argmax(y_smooth[w])
+    m_peak = mr[w][idx]
+    offset = m_peak - target
+    return mr - offset, offset
 
 
 
@@ -541,35 +567,28 @@ for name, d, pressure in zip(molecules_run['name'], molecules_run['data'], molec
     mr = mr[mask2]
     s_filtered = savgol_filter(s, 31, 3)
     
-    s/= max(s_filtered) /100
-    s_filtered /= max(s_filtered)/100
-    
-    
-    
-    peaks, _ = find_peaks(s_filtered, prominence=5, distance=30)
-    widths_idx, height_eval, left_ips, right_ips = peak_widths(s_filtered, peaks, rel_height=0.5)
-    idx = np.arange(s_filtered.size)
-    m_left = np.interp(left_ips, idx, mr)
-    m_right = np.interp(right_ips, idx, mr)
-    peak_errors = (m_right - m_left) / (2 * np.sqrt(12))  # FWHM to standard deviation
+    resid = s - s_filtered
+    sigma = np.median(np.abs(resid - np.median(resid))) 
+    prom = 4 * sigma  
+
+    peaks, props = find_peaks(s_filtered, prominence=prom, distance=30)
+
     mr_peaks = mr[peaks]
     s_filtered_peaks = s_filtered[peaks]
     
     offset = mr_peaks[np.argmax(s_filtered_peaks)] - 28
     
-    mr -= offset
+    mr, offset = shift_to_28(mr, s_filtered)
     mr_peaks -= offset
-    
     
     s_mol= DatasetSpec(x=mr, y=s, label=f"${name_mol}$", line='-', marker='None',color='tab:green', fit_y=s_filtered, fit_x=mr, fit_label=f'${name_mol}$ Smooth', fit_color='tab:blue', linewidth=0.5)
     s_peaks = DatasetSpec(x=mr_peaks, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', line='None', marker='x', color='tab:red', markersize=24)
-    s_peaks_bar = DatasetSpec(x=np.rint(mr_peaks).astype(int)+0.1, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', plot_style='bar', barwidth=0.2)
-    s_theory = DatasetSpec(x=data[name_mol]['mz']-0.1, y=data[name_mol]['s'], label=f'${name_mol}$ Theorie', color='tab:purple', plot_style='bar', barwidth=0.2)
+    s_peaks_bar = DatasetSpec(x=np.rint(mr_peaks).astype(int)+0.1, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', plot_style='bar', barwidth=0.2, color='tab:red')
 
     fig, ax = plot_data(
-        [s_theory, s_peaks_bar, s_mol, s_peaks],
+        [s_peaks_bar, s_mol, s_peaks],
         #filename=f'Plots/{name}.pdf',
-        title=f'Signalstärke von {name.replace("_", " ")} im Vergleich zur Theorie',
+        title=f'Signalstärke von {name.replace("_", " ")} und gefundene Peaks',
         xlabel='Massenladungszahl ($m/z$)',
         ylabel='Signalstärke (arb. Einheiten)',
         width=20,
@@ -580,6 +599,12 @@ for name, d, pressure in zip(molecules_run['name'], molecules_run['data'], molec
     )
     ax.xaxis.set_major_locator(MultipleLocator(2))
     plt.savefig(f'Plots/{name}.pdf')
+    
+    s_filtered_peaks /= max(s_filtered_peaks)/100
+    
+    s_peaks_bar = DatasetSpec(x=np.rint(mr_peaks).astype(int)+0.1, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', plot_style='bar', barwidth=0.2, color='tab:red')
+    s_theory = DatasetSpec(x=data[name_mol]['mz']-0.1, y=data[name_mol]['s'], label=f'${name_mol}$ Theorie', color='tab:purple', plot_style='bar', barwidth=0.2)
+
     
     
     fig, ax = plot_data(
