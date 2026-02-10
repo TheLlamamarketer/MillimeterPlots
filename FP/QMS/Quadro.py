@@ -1,3 +1,4 @@
+from re import S
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -14,6 +15,34 @@ from Functions.help import *
 from scipy.interpolate import UnivariateSpline
 from collections import defaultdict
 
+def fwhm(m, y, peak_idx):
+    """
+    FWHM relative to baseline 0.
+    Returns (dm, m_center, half_level). Returns (nan, nan, half) if not measurable.
+    """
+    m = np.asarray(m, float)
+    y = np.asarray(y, float)
+
+    ypk = y[peak_idx]
+    if ypk <= 0:
+        return np.nan, np.nan, np.nan
+
+    half = 0.5 * ypk
+
+    # left crossing
+    i = peak_idx
+    while i > 0 and y[i] > half:
+        i -= 1
+    mL = np.interp(half, [y[i], y[i+1]], [m[i], m[i+1]])
+
+    # right crossing
+    i = peak_idx
+    while i < len(y) - 1 and y[i] > half:
+        i += 1
+    mR = np.interp(half, [y[i-1], y[i]], [m[i-1], m[i]])
+
+
+    return mR, mL, mR - mL, half
 
 source_dir = Path(__file__).resolve().parent / "Data"
 
@@ -78,7 +107,7 @@ l = 0.1
 nu = 2.5e6
 
 
-sU, s_peaks, cycles, deltas = [], [], [], []
+sU, s_peaks, cycles, deltas, masses = [], [], [], [], []
 for i, (name, d, pressure) in enumerate(zip(voltage_run['name'][:], voltage_run['data'][:], voltage_run['pressure'][:])):
     mr, s = d
     b0 = np.quantile(s, 0.1)
@@ -103,22 +132,39 @@ for i, (name, d, pressure) in enumerate(zip(voltage_run['name'][:], voltage_run[
     peaks = peaks[sort_idx]
     props = {key: val[sort_idx] for key, val in props.items()}
 
-    # FWHM
-    widths_idx, width_heights, left_ips, right_ips = peak_widths(s_smooth, peaks, rel_height=0.5)
-    idx = np.arange(s.size)
-    m_left  = np.interp(left_ips,  idx, mr)
-    m_right = np.interp(right_ips, idx, mr)
+    m_right = []
+    m_left = []
+    dm = []
+    half_levels = []
+    
+    
+    widths, height_eval, left_ips, right_ips = peak_widths(s_smooth, peaks, rel_height=1)
+    
+    for p in peaks:
+        mR, mL, dm_val, half = fwhm(mr, s_smooth, p)
+        m_right.append(mR)
+        m_left.append(mL)
+        dm.append(dm_val)
+        half_levels.append(half)
+    
+    if props['prominences'][1] < 0.5*s[peaks[1]]:
+        mR = np.interp(right_ips[1], np.arange(s_smooth.size), mr)
+        mL = np.interp(left_ips[1], np.arange(s_smooth.size), mr)
+        dm_val = mR - mL
+        m_right[1]= mR
+        m_left[1] = mL
+        dm[1] = dm_val
+        half_levels[1] = height_eval[1]
+
 
     mr_peaks = mr[peaks]
     signal_peaks = s[peaks]
-    delta = m_right - m_left
+    delta = np.array(dm)
     res = mr_peaks / delta
-    
-    print(f"Run: {name}, Peaks at m/z: {mr_peaks}, Δ(m/z): {delta}, Resolution: {res}")
 
-    s_peaks.append(DatasetSpec(x=mr_peaks, y=signal_peaks, line='None', marker='x', color='red', markersize=12,
-                               axlines=[(width_heights[0], "h"), (width_heights[1], "h") ], axlines_intervals=[(m_left[0], m_right[0]), (m_left[1], m_right[1])], 
-                               axlines_line='--', axlines_color=color, axlines_label=None if i else [f'Δ(m/z) von jedem Peak'] ))
+    s_peaks.append(DatasetSpec(x=mr_peaks, y=signal_peaks, line='None', marker='x', color='red', markersize=12, label=None if i else 'gefundene Peaks', 
+                               axlines=[(half_levels[0], "h"), (half_levels[1], "h") ], axlines_intervals=[(m_left[0], m_right[0]), (m_left[1], m_right[1])], 
+                               axlines_line='-.', axlines_color=color, axlines_label=None if i else [f'Δ(m/z) von jedem Peak'] ))
     
     e = 1.6e-19
     u = 1.66e-27
@@ -126,9 +172,11 @@ for i, (name, d, pressure) in enumerate(zip(voltage_run['name'][:], voltage_run[
     N_N2 = nu * l *(mr_peaks[0] * u /( 2* U_B[i] * e))**0.5
     N_O2 = nu * l *(mr_peaks[1] * u /( 2* U_B[i] * e))**0.5
     
-    print(f"Number of RF cycles for N2^+: {N_N2:.2f}, for O2^+: {N_O2:.2f}")
+    print(f'U_B={U_B[i]:.2f}V: N_N2={N_N2:.2f}, N_O2={N_O2:.2f}, Δm={delta}, m={mr_peaks}')
+    
     cycles.append((N_N2, N_O2))
     deltas.append(delta)
+    masses.append(mr_peaks)
 
 
 plot_data(
@@ -150,9 +198,9 @@ s_cycles_O2 = DatasetSpec(x=[c[1] for c in cycles],y=[delta[1] for delta in delt
 plot_data(
     [s_cycles_N2, s_cycles_O2],
     filename='Plots/cycles.pdf',
-    title='Anzahl der RF-Zyklen bis zum Peak',
+    title='Oszillationen in Abhängigkeit von Δ(m/z)',
     ylabel='$\\Delta(m/z)$',
-    xlabel='Anzahl der Zyklen N',
+    xlabel='Anzahl der Oszillationen N',
     width=10,
     height=10,
     color_seed=42,
@@ -163,50 +211,64 @@ plot_data(
 
 
 
+data_volt = {
+    'acceleration': U_B.tolist(),
+    'mass_N2': [m[0] for m in masses],
+    'mass_width_N2': [d[0] for d in deltas],
+    'oscillations_N2': [c[0] for c in cycles],
+    'mass_O2': [m[1] for m in masses],
+    'mass_width_O2': [d[1] for d in deltas],
+    'oscillations_O2': [c[1] for c in cycles],
+}
+
+headers_volt = {
+    'acceleration': {'label': '{$U_B$ (V)}', 'repeat': False},
+    'mass_N2': {'label': '{$m (u)$}', 'intermed': False},
+    'mass_width_N2': {'label': '{$\\Delta m (u)$}', 'intermed': False},
+    'oscillations_N2': {'label': '{$N$}', 'intermed': False},
+    'mass_O2': {'label': '{$m (u)$}', 'intermed': False},
+    'mass_width_O2': {'label': '{$\\Delta m (u)$}', 'intermed': False},
+    'oscillations_O2': {'label': '{$N$}', 'intermed': False},
+}
+
+header_groups = [('', 1), ('N$_2^+$', 3), ('O$_2^+$', 3)]
+
+print_standard_table(
+    data_volt,
+    headers=headers_volt,
+    header_groups=header_groups,
+    caption="Messungen der peaks von $N_2^+$ und $O_2^+$ von Luft bei verschiedenen Beschleunigungsspannungen.",
+    label="tab:voltage",
+    show=True
+)
+
+
+
+
+
+
+
+windows = [
+    ("CH4/fragment", 14.5, 16.5),
+    ("H2O",          17, 18.5),
+    ("N2",           27, 28.5),
+    ("O2",           29.5, 31.5),
+    ("CO2",          43.5, 46),
+]
+
+
+
 
 sorting_res = np.argsort([int(name[5]) for name in resolution_run['name']])
 resolution_run['name'] = [resolution_run['name'][i] for i in sorting_res]
 resolution_run['data'] = [resolution_run['data'][i] for i in sorting_res]
 resolution_run['pressure'] = [resolution_run['pressure'][i] for i in sorting_res]
 
-print("Resolution Run:")
 
-
-def fwhm_halfmax_zero_baseline(m, y, peak_idx):
-    """
-    FWHM relative to baseline 0.
-    Returns (dm, m_center, half_level). Returns (nan, nan, half) if not measurable.
-    """
-    m = np.asarray(m, float)
-    y = np.asarray(y, float)
-
-    ypk = y[peak_idx]
-    if ypk <= 0:
-        return np.nan, np.nan, np.nan
-
-    half = 0.5 * ypk
-
-    # left crossing
-    i = peak_idx
-    while i > 0 and y[i] > half:
-        i -= 1
-    if i == peak_idx or i == 0:
-        return np.nan, np.nan, half
-    mL = np.interp(half, [y[i], y[i+1]], [m[i], m[i+1]])
-
-    # right crossing
-    i = peak_idx
-    while i < len(y) - 1 and y[i] > half:
-        i += 1
-    if i == peak_idx or i == len(y) - 1:
-        return np.nan, np.nan, half
-    mR = np.interp(half, [y[i-1], y[i]], [m[i-1], m[i]])
-
-    return mR, mL, mR - mL
-
-
-
+# Store data per resolution: each entry is (resolution_value, mass_array, delta_m_array)
+resolution_data = []
 s_res, s_peaks = [], []
+
 for i, (name, d, pressure) in enumerate(zip(resolution_run['name'], resolution_run['data'], resolution_run['pressure'])):
     mr, s = d
     b0 = np.quantile(s, 0.1)
@@ -214,37 +276,84 @@ for i, (name, d, pressure) in enumerate(zip(resolution_run['name'], resolution_r
     
     s_smooth = savgol_filter(s, 31, 3)
     
-    peaks, _ = find_peaks(s_smooth, prominence=0.6*np.sqrt(max(s)), distance=30)
-    if peaks.size > 2:
-        top2_idx = np.argsort(s[peaks])[-2:]
-        peaks = peaks[top2_idx]
-        
+    resid = s - s_smooth
+    sigma = np.median(np.abs(resid - np.median(resid)))  # robust MAD sigma
+    prom = 4 * sigma  # tune 4..10 depending on how aggressive you want it
 
-    widths_idx, width_heights, left_ips, right_ips = peak_widths(s_smooth, peaks, rel_height=0.5)
-    idx = np.arange(s.size)
-    m_left  = np.interp(left_ips,  idx, mr)
-    m_right = np.interp(right_ips, idx, mr)
+    peaks_all, props = find_peaks(s_smooth, prominence=prom, distance=30)
+
+    peaks_sel = []
+    labels_sel = []
+
+    for lab, lo, hi in windows:
+        mask = (mr[peaks_all] >= lo) & (mr[peaks_all] <= hi)
+        cand = peaks_all[mask]
+        if cand.size == 0:
+            continue
+
+        # choose strongest candidate within this window
+        p = cand[np.argmax(s_smooth[cand])]
+        peaks_sel.append(p)
+        labels_sel.append(lab)
+
+    peaks = np.array(peaks_sel, dtype=int)
     
+    # Filter props to match selected peaks
+    selected_indices = [np.where(peaks_all == p)[0][0] for p in peaks]
+    props = {key: val[selected_indices] for key, val in props.items()}
+
+    # sort by m/z
+    sort_idx = np.argsort(mr[peaks])
+    peaks = peaks[sort_idx]
+    props = {key: val[sort_idx] for key, val in props.items()}
+    
+    res_value = int(name[5])
+
+    # Calculate widths for all peaks in this resolution
     m_right = []
     m_left = []
     dm = []
+    half_levels = []
+    
+    widths, height_eval, left_ips, right_ips = peak_widths(s_smooth, peaks, rel_height=0.4 if res_value == 3 else 0.6)
+    
+    # Use FWHM for all peaks by default
     for p in peaks:
-        mR, mL, dm_val = fwhm_halfmax_zero_baseline(mr, s_smooth, p)
+        mR, mL, dm_val, half = fwhm(mr, s_smooth, p)
         m_right.append(mR)
         m_left.append(mL)
         dm.append(dm_val)
+        half_levels.append(half)
     
-    mr_peaks = mr[peaks]
-    signal_peaks = s[peaks]
-    
-    print(f"Run: {name}, Peaks at m/z: {mr_peaks}, Δ(m/z): {dm}, Resolution: {mr_peaks / (np.array(dm))}")
+    # For res=2 and res=3, use prominence width for the first peak (index 0) only
+    if res_value in [2, 3] and len(peaks) > 0:
+        mR = np.interp(right_ips[0], np.arange(s_smooth.size), mr)
+        mL = np.interp(left_ips[0], np.arange(s_smooth.size), mr)
+        dm_val = mR - mL
+        m_right[0] = mR
+        m_left[0] = mL
+        dm[0] = dm_val
+        half_levels[0] = height_eval[0]
 
     
+    mr_peaks = mr[peaks]
+    dm_array = np.array(dm)
+    signal_peaks = s[peaks]
     
-    color = plt.cm.viridis(int(name[5])*10 / 100) # all colormaps are: plasma, viridis, inferno, magma, cividis
-    s_res.append(DatasetSpec(x=mr, y=s, label=f'$Res = {name[5]}$', line='-', marker='None', color=color, linewidth=0.5))
-    s_peaks.append(DatasetSpec(x=mr_peaks, y=signal_peaks, line='None', marker='x', color='red', markersize=12, 
-                               axlines=[(signal_peaks[0]/2, "h"), (signal_peaks[1]/2, "h") ], axlines_intervals=[(m_left[0], m_right[0]), (m_left[1], m_right[1])], 
+    # Store all peaks for this resolution together
+    resolution_data.append({
+        'resolution': res_value,
+        'masses': mr_peaks,
+        'delta_m': dm_array,
+        'name': name
+    })
+    
+    print(f'Res={res_value}: m/z = {mr_peaks}, Δm = {dm_array}, Auflösung = {mr_peaks/dm_array}')
+    
+    color = plt.cm.viridis(res_value*10 / 100)
+    s_res.append(DatasetSpec(x=mr, y=s, label=f'$Res = {res_value}$', line='-', marker='None', color=color, linewidth=0.5))
+    s_peaks.append(DatasetSpec(x=mr_peaks, y=signal_peaks, line='None', marker='x', color='red', markersize=12, label=None if i else 'gefundene Peaks', 
+                               axlines=[(half, 'h') for half in half_levels], axlines_intervals=[(m_left[j], m_right[j]) for j in range(len(peaks))],
                                axlines_line='--', axlines_color=color, axlines_label=None if i else [f'Δ(m/z) von jedem Peak'] ))
 
 plot_data(
@@ -259,6 +368,138 @@ plot_data(
     color_seed=42,
     plot=False,
 )
+
+
+s_mass = []
+fit_results_by_res = {}  # Store fit results for table
+
+for data in resolution_data:
+    res_value = data['resolution']
+    masses_arr = data['masses']
+    delta_m_arr = data['delta_m']
+    
+    color = plt.cm.viridis(res_value * 10 / 100)
+    
+    # Perform linear fit for this resolution's data
+    if len(masses_arr) > 1:  # Need at least 2 points for a fit
+        results = lmfit(model='linear', xdata=masses_arr, ydata=delta_m_arr)
+        fit_mr = np.linspace(masses_arr.min(), masses_arr.max(), 100)
+        fit_y = results.eval(x=fit_mr)
+        
+        # Store fit parameters for table
+        fit_results_by_res[res_value] = {
+            'masses': masses_arr,
+            'delta_m': delta_m_arr,
+            'intercept': results.params['a'].value,  # y-intercept
+            'slope': results.params['b'].value,  # slope = Δm/m
+            'r_squared': 1 - results.residual.var() / np.var(delta_m_arr) if np.var(delta_m_arr) > 0 else 0
+        }
+        
+        s_mass.append(DatasetSpec(
+            x=masses_arr, 
+            y=delta_m_arr, 
+            marker='o', 
+            color=color, 
+            fit_x=fit_mr, 
+            fit_y=fit_y, 
+            fit_label=f'Res={res_value} Fit', 
+            label=f'Res={res_value}'
+        ))
+    else:
+        # Just plot the single point without fit
+        fit_results_by_res[res_value] = {
+            'masses': masses_arr,
+            'delta_m': delta_m_arr,
+            'intercept': None,
+            'slope': None,
+            'r_squared': None
+        }
+        s_mass.append(DatasetSpec(
+            x=masses_arr, 
+            y=delta_m_arr, 
+            marker='o', 
+            color=color, 
+            label=f'Res={res_value}'
+        ))
+
+fig, ax = plot_data(
+    s_mass,
+    title='Massenauflösung bei verschiedenen Genauigkeiten',
+    xlabel='Massen $m/z$',
+    ylabel='$\\Delta m/z$',
+    width=20,
+    height=20,
+    color_seed=42,
+    plot='figure',
+)
+
+ax.xaxis.set_major_locator(MultipleLocator(2))
+plt.savefig('Plots/mass_resolution.pdf')
+
+
+# Prepare data for resolution table (peaks only)
+# Find max number of peaks across all resolutions
+max_peaks = max(len(fit_results_by_res[res]['masses']) for res in fit_results_by_res)
+
+# Build data dictionary for the peaks table
+data_res = {}
+for res in sorted(fit_results_by_res.keys()):
+    fit_data = fit_results_by_res[res]
+    masses = fit_data['masses'].tolist()
+    delta_m = fit_data['delta_m'].tolist()
+    
+    # Pad with empty strings to match max_peaks length
+    masses_padded = masses + [''] * (max_peaks - len(masses))
+    delta_m_padded = delta_m + [''] * (max_peaks - len(delta_m))
+    
+    data_res[f'm_{res}'] = masses_padded
+    data_res[f'dm_{res}'] = delta_m_padded
+
+# Build headers dictionary for peaks table
+headers_res = {}
+for res in sorted(fit_results_by_res.keys()):
+    headers_res[f'm_{res}'] = {'label': '{$m/z$}', 'intermed': False}
+    headers_res[f'dm_{res}'] = {'label': '{$\\Delta m/z$}', 'intermed': False}
+
+# Header groups: (name, num_columns)
+header_groups = [(f'{res}', 2) for res in sorted(fit_results_by_res.keys())]
+
+print_standard_table(
+    data_res,
+    headers=headers_res,
+    header_groups=header_groups,
+    caption="Gemessene Peaks bei verschiedenen Auflösungen.",
+    label="tab:resolution_peaks",
+    show=True
+)
+
+# Second table: Fit parameters (intercept, slope and R²)
+data_fit = {
+    'resolution': sorted(fit_results_by_res.keys()),
+    'intercept': [fit_results_by_res[res]['intercept'] for res in sorted(fit_results_by_res.keys())],
+    'slope': [fit_results_by_res[res]['slope'] for res in sorted(fit_results_by_res.keys())],
+    'r_squared': [fit_results_by_res[res]['r_squared'] for res in sorted(fit_results_by_res.keys())],
+}
+
+headers_fit = {
+    'resolution': {'label': '{Auflösung}', 'intermed': True, 'round': False},
+    'intercept': {'label': '{$a_0$ (Achsenabschnitt)}', 'intermed': True},
+    'slope': {'label': '{$\\Delta m/m$}', 'intermed': True},
+    'r_squared': {'label': '{$R^2$}', 'intermed': True},
+}
+
+print_standard_table(
+    data_fit,
+    headers=headers_fit,
+    caption="Lineare Fit-Parameter für verschiedene Auflösungen.",
+    label="tab:resolution_fit",
+    show=True
+)
+
+
+
+
+
 
 
 data={
@@ -320,7 +561,7 @@ for name, d, pressure in zip(molecules_run['name'], molecules_run['data'], molec
     mr_peaks -= offset
     
     
-    s_mol= DatasetSpec(x=mr, y=s, label=f"${name_mol}$", line='-', marker='None',color='tab:green', fit_y=s_filtered, fit_x=mr, fit_label=f'${name_mol}$ Fit', fit_color='tab:blue', linewidth=0.5)
+    s_mol= DatasetSpec(x=mr, y=s, label=f"${name_mol}$", line='-', marker='None',color='tab:green', fit_y=s_filtered, fit_x=mr, fit_label=f'${name_mol}$ Smooth', fit_color='tab:blue', linewidth=0.5)
     s_peaks = DatasetSpec(x=mr_peaks, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', line='None', marker='x', color='tab:red', markersize=24)
     s_peaks_bar = DatasetSpec(x=np.rint(mr_peaks).astype(int)+0.1, y=s_filtered_peaks, label=f'${name_mol}$ Peaks', plot_style='bar', barwidth=0.2)
     s_theory = DatasetSpec(x=data[name_mol]['mz']-0.1, y=data[name_mol]['s'], label=f'${name_mol}$ Theorie', color='tab:purple', plot_style='bar', barwidth=0.2)
