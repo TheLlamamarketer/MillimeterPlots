@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from matplotlib.collections import LineCollection
-from matplotlib.ticker import AutoMinorLocator, EngFormatter, ScalarFormatter, LogLocator, LogFormatter, LogFormatterMathtext
+from matplotlib.ticker import AutoMinorLocator, LogLocator, LogFormatter, LogFormatterMathtext
 import matplotlib.colors as mcolors
 from matplotlib import patheffects as pe
 from matplotlib.axes import Axes
@@ -401,57 +401,6 @@ def _auto_style_from_bg(bg_hex: str) -> str:
     return "dark" if L < 0.5 else "light"
 
 
-# -----------------------------------------------------------------------------
-# SI/Eng formatting helpers
-# -----------------------------------------------------------------------------
-
-def apply_si_format(
-    ax: Axes,
-    *,
-    xunit: str | None = None,
-    yunit: str | None = None,
-    x_eng: bool = True,
-    y_eng: bool = True,
-    sci_limits: Tuple[int, int] = (-3, 3),
-    put_unit_in_label: bool = True,
-):
-    """Apply scientific/engineering formatters with optional units.
-
-    - If `x_eng`/`y_eng` is True, use EngFormatter (k, m, µ, …).
-    - Else use ScalarFormatter with power limits `sci_limits`.
-    - If the axis label lacks a trailing unit like "[V]", append it.
-    """
-    def _ensure_unit(lbl: str | None, unit: str | None) -> str | None:
-        if not put_unit_in_label or not unit:
-            return lbl
-        if lbl is None or lbl == "":
-            return f"[{unit}]"
-        if "[" in lbl and "]" in lbl:
-            return lbl  # assume already present
-        return f"{lbl} [{unit}]"
-
-    if x_eng:
-        ax.xaxis.set_major_formatter(EngFormatter(unit=xunit or ""))
-    else:
-        xf = ScalarFormatter(useMathText=True)
-        xf.set_powerlimits(sci_limits)
-        ax.xaxis.set_major_formatter(xf)
-
-    if y_eng:
-        ax.yaxis.set_major_formatter(EngFormatter(unit=yunit or ""))
-    else:
-        yf = ScalarFormatter(useMathText=True)
-        yf.set_powerlimits(sci_limits)
-        ax.yaxis.set_major_formatter(yf)
-
-    x_lbl = _ensure_unit(ax.get_xlabel(), xunit)
-    if x_lbl is not None:
-        ax.set_xlabel(x_lbl)
-    y_lbl = _ensure_unit(ax.get_ylabel(), yunit)
-    if y_lbl is not None:
-        ax.set_ylabel(y_lbl)
-
-
 # Helper function to dispatch plot based on style
 def _plot_series_data(
     ax: Axes,
@@ -718,8 +667,8 @@ def plot_data(
 
         # Plot series
         for s in specs:
-            x = np.atleast_1d(np.asarray(s.x, dtype=float))
-            y = np.atleast_1d(np.asarray(s.y, dtype=float))
+            x = np.atleast_1d(np.asarray(s.x))
+            y = np.atleast_1d(np.asarray(s.y))
             if x.size == 0 or y.size == 0:
                 continue
             if x.shape != y.shape:
@@ -919,13 +868,13 @@ def plot_data(
                 xf = np.asarray(s.fit_x if s.fit_x is not None else x, dtype=float)
                 for (lo, hi) in s.fit_error_lines:
                     if lo is not None:
-                        le, = ax.plot(xf, np.asarray(lo, dtype=float), linestyle="--", color=color, linewidth=1.0, zorder=s.zorder)
+                        le, = ax.plot(xf, np.asarray(lo, dtype=float), linestyle="--", color=color, linewidth=max(1.2, s.linewidth), zorder=s.zorder)
                         if outline:
                             le.set_path_effects([
                                 pe.Stroke(linewidth=le.get_linewidth()+outline_width, foreground=oc), pe.Normal()
                             ])
                     if hi is not None:
-                        he, = ax.plot(xf, np.asarray(hi, dtype=float), linestyle="--", color=color, linewidth=1.0, zorder=s.zorder)
+                        he, = ax.plot(xf, np.asarray(hi, dtype=float), linestyle="--", color=color, linewidth=max(1.2, s.linewidth), zorder=s.zorder)
                         if outline:
                             he.set_path_effects([
                                 pe.Stroke(linewidth=he.get_linewidth()+outline_width, foreground=oc), pe.Normal()
@@ -971,18 +920,6 @@ def plot_data(
         handles, labels = ax.get_legend_handles_labels()
         if any(labels) and legend_position:
             ax.legend(loc=legend_position)
-
-        # SI/Eng formatting at the end (tick locs are established)
-        if (xunit is not None or yunit is not None or not (x_eng and y_eng)):
-            apply_si_format(
-                ax,
-                xunit=None if is_x_log else xunit,
-                yunit=None if is_y_log else yunit,
-                x_eng=False if is_x_log else x_eng,
-                y_eng=False if is_y_log else y_eng,
-                sci_limits=sci_limits,
-                put_unit_in_label=put_unit_in_label,
-            )
 
         if tight:
             with warnings.catch_warnings():

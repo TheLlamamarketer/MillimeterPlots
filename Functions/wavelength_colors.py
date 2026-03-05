@@ -191,7 +191,7 @@ def lines_to_rgb(wavelengths_nm, intensities=1.0, **kwargs):
     if k.size == 1: k = np.repeat(k, wl.size)
     lin = np.zeros(3, float)
     for w, a in zip(wl, k):
-        lin += a * wavelength_to_rgb(w, encode=False, **kwargs)
+        lin += a * wavelength_to_rgb(w, **kwargs)
     return srgb_eotf(np.clip(lin, 0.0, 1.0))
 
 
@@ -298,6 +298,48 @@ def load_cmap(path, name="spectrum_from_file"):
 #save_cmap_lut("colormaps/spectrum_wavelengths_0p01.npz", step=0.01)
 
 
+def temperature_to_rgb(T_kelvin, *, space="sRGB", gamut_map="oklab", encode=True,
+                       normalize="maxRGB"):
+    """
+    Convert blackbody temperature to RGB color using Planck's law.
+    normalize: "maxRGB" scales to avoid clipping; "Y" normalizes luminance.
+    """
+    h = 6.62607015e-34   # Planck constant (J·s)
+    c = 299792458.0      # Speed of light (m/s)
+    k_B = 1.380649e-23   # Boltzmann constant (J/K)
+
+    # Match the current spectral grid for CMFs
+    wls_nm = np.arange(SHAPE.start, SHAPE.end + 1e-9, SHAPE.interval)
+    wls_m = wls_nm * 1e-9
+
+    # Planck's law: L(λ,T) = (2hc^2 / λ^5) / (exp(hc/λkT) - 1)
+    c1 = 2.0 * h * c**2
+    c2 = h * c / k_B
+    planck = c1 / (wls_m**5 * np.expm1(c2 / (wls_m * T_kelvin)))
+
+    # Normalize spectrum to prevent numeric dominance
+    planck = planck / planck.max()
+
+    # Integrate SPD against CIE 1931 CMFs
+    n = min(planck.size, XYZ_AE.shape[0])
+    XYZ = (XYZ_AE[:n] * planck[:n, None]).sum(axis=0)
+
+    if normalize == "Y" and XYZ[1] > 0:
+        XYZ = XYZ / XYZ[1]
+
+    M = M_XYZ2LIN_P3 if space.upper() == "P3" else M_XYZ2LIN_SRGB
+    lin = _map_lin_from_XYZ(XYZ, M, gamut_map)
+
+    if normalize == "maxRGB":
+        m = float(lin.max())
+        if m > 0:
+            lin = lin / m
+
+    lin = np.clip(lin, 0.0, 1.0)
+    return srgb_eotf(lin) if encode else lin
+
+
+
 
 
 # =========================
@@ -363,6 +405,37 @@ def show_spectrum_strip():
     amps = spd / spd.max()
     show_source_strip("Phosphor white LED (model)", w.tolist(), amps.tolist(),
                     space="sRGB", brightness="equal", gamut_map="oklab")
+
+def show_temperature_colors():
+    # Visualize multiple temperatures
+    temps = np.linspace(0, 15000, 500)
+    colors = [temperature_to_rgb(T) for T in temps]
+    fig, ax = plt.subplots(figsize=(10, 3))
+    fig.patch.set_alpha(0)  # Transparent figure background
+    ax.patch.set_alpha(0)   # Transparent axes background
+
+    step = float(temps[1] - temps[0]) if len(temps) > 1 else 1.0
+    left_edges = temps - 0.5 * step
+    ax.barh(np.zeros_like(temps), step, left=left_edges,
+        color=colors, height=1, edgecolor='none', align='edge')
+    ax.set_xlim(temps[0] - 0.5 * step, temps[-1] + 0.5 * step)
+    ax.set_ylim(0, 1)
+
+    # White text for dark background compatibility
+    ax.set_xlabel("Temperature (K)", color='white', fontsize=10)
+    ax.set_title("Blackbody Colors vs Temperature", color='white', fontsize=12)
+    ax.tick_params(colors='white')
+
+    ax.spines['bottom'].set_color('white')
+    ax.spines['left'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.set_yticks([])
+    ax.locator_params(axis='x', nbins=20)
+    plt.tight_layout()
+    plt.savefig("blackbody_colors.png", dpi=300, bbox_inches='tight', transparent=True)
+    plt.show()
+
 
 if __name__ == "__main__":
     show_spectrum_strip()

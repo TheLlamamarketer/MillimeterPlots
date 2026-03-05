@@ -1,4 +1,3 @@
-from re import A
 from matplotlib import pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
