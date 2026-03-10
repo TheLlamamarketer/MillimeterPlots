@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from pathlib import Path
 import sys
 
@@ -12,11 +11,11 @@ from Functions.help import *
 
 source_dir = Path(__file__).resolve().parent / "data"
 
-data = {}
+raw_data = {}
 names = []
 for f in source_dir.glob("*.csv"):
     t, I = pd.read_csv(source_dir / f, sep=",", header=None).values.T
-    data[f.stem] = {"t": t, "I": I}
+    raw_data[f.stem] = {"t": t, "I": I}
     names.append(f.stem)
 
 
@@ -29,6 +28,10 @@ Pf = 101330
 wavelength = 405e-9  # in m
 S = 1 / (wavelength * 1e6) ** 2  # in 1/um
 
+FIT_START = 100.25
+FIT_END = 200.0
+
+starts = np.linspace(100, 105, 50)
 
 A = 8342.54
 B = 2406147
@@ -40,19 +43,22 @@ G = 0.003661
 
 n_s = 1 + 1e-8 * (A + B / (130 - S) + C / (38.9 - S))
 
-
 def n_air(T, P):
     t = T - 273.15
     X = (1 + 1e-8 * (E - F * t) * P) / (1 + G * t)
     return 1 + P * (n_s - 1) * X / D
 
+def transform_intensity(raw_I):
+    return raw_I * -1e4
 
 for T, P in zip([T0, Tf], [P0, Pf]):
     n = n_air(T, P)
-    print(f"T={T - 273.15:.1f} C and P={P / 1e2:.1f} mbar n = {n:.8f}")
+    N = P / (1.380649e-23 * T)
+    beta = 24 * np.pi**3 * ((n**2 - 1) / (n**2 + 2)) ** 2 / (wavelength**4 * N)
+    print(f"$T={T - 273.15:.1f} \\mathrm{{^\\circ C}}$ and $P={P / 1e2:.1f} \\mathrm{{mbar}}$, $n = {n:.8f}$, $\\beta = {beta*1e5:.4f} \\times 10^5 \\mathrm{{m}}^{{-1}}$")
 
 n_avg = (n_air(T0, P0) + n_air(Tf, Pf)) / 2
-print(f"Average n = {n_avg:.6f}")
+print(f"Average n = {n_avg:.7f}")
 
 P_avg = (P0 + Pf) / 2
 T_avg = (T0 + Tf) / 2
@@ -60,6 +66,7 @@ N = P_avg / (1.380649e-23 * T_avg)
 
 beta_th = 24 * np.pi**3 * ((n_avg**2 - 1) / (n_avg**2 + 2)) ** 2 / (wavelength**4 * N)
 
+c = 299792458
 
 taus_vac = []
 taus_air = []
@@ -68,34 +75,57 @@ s_air = []
 tau_scan_specs = []
 r2_scan_specs = []
 
-for i, name in enumerate(names):
-    t_raw = data[name]["t"]
-    I_raw = data[name]["I"]
+for name in names:
+    t_raw = raw_data[name]["t"]
+    I_raw = raw_data[name]["I"]
+    
+    
+    s_raw = DatasetSpec(
+        x=t_raw,
+        y=I_raw,
+        marker=".",
+        line="None",
+        color_group=name,
+        label=f"Raw {name}",
+    )
+    
+    plot_data(
+        s_raw,
+        height=15,
+        width=20,
+        color_seed=54,
+        title=f"Raw data for {name}",
+        xlabel="Time (s)",
+        ylabel="Intensity (a.u.)",
+        #filename=f"Plots/raw_{name}.pdf",
+        plot=False,
+    )
+    
 
     t_us = t_raw * 1e6
-    start = 100.0
-    end = 200.0
+    start = FIT_START
+    end = FIT_END
 
     mask = (t_us > start) & (t_us < end)
     t = t_us[mask]
-    I = I_raw[mask] * -1e4 + 1.5
+    I = transform_intensity(I_raw[mask])
 
     t0 = t.min()
-
+ 
     # Estimate the baseline from the last part of the selected trace.
     c0 = np.mean(I[-max(20, len(I) // 10) :])
     A0 = I[0] - c0
 
-    starts = np.linspace(100.0, 120.0, 200)
     start_scan_vals = []
     tau_scan = []
     tau_err_scan = []
     r2_scan = []
+    
 
     for start_scan in starts:
         mask_scan = (t_us > start_scan) & (t_us < end)
         t_scan = t_us[mask_scan]
-        I_scan = I_raw[mask_scan] * -1e4 + 1.5
+        I_scan = transform_intensity(I_raw[mask_scan])
 
         if len(t_scan) < 40:
             continue
@@ -147,36 +177,28 @@ for i, name in enumerate(names):
     s = DatasetSpec(
         x=t,
         y=I - c_fit,
-        marker="None",
-        line="-",
+        marker=".",
+        line="None",
         color_group=name,
         label=f"${name}$",
         fit_x=t_fit,
         fit_y=res.eval(x=t_fit) - c_fit,
-        fit_color="red",
+        fit_color="tab:red",
     )
     if "vac" in name:
         s_vac.append(s)
     else:
         s_air.append(s)
 
-    s_res = DatasetSpec(
-        x=t,
-        y=residuals,
-        marker="None",
-        line="-",
-        color_group=name,
-        label=f"Residuals {name}",
-    )
-
     plot_data(
-        s_res,
-        height=15,
-        width=20,
+        s,
+        height=8,
+        width=10,
         color_seed=54,
-        title=f"{name}: tau = {tau:.3f} +- {dtau:.3f} us, R^2 = {res.rsquared:.4f}",
-        xlabel="Time $(\\mu s)$",
-        ylabel="Residuals",
+        title=f"${name}$: $\\tau = {print_round_val(tau, dtau)} \\, \\mathrm{{\\mu s}}$, $R^2 = {res.rsquared:.4f}$",
+        xlabel="Time t $(\\mu s)$",
+        ylabel="Intensity (a.u.)",
+        filename=f"Plots/{name}.pdf",
         plot=False,
     )
 
@@ -203,8 +225,218 @@ for i, name in enumerate(names):
     )
 
 
-tau_scan_specs_vac = [spec for spec in tau_scan_specs if "vac" in (spec.label or "").lower()]
-tau_scan_specs_air = [spec for spec in tau_scan_specs if "vac" not in (spec.label or "").lower()]
+plot_data(
+    s_vac,
+    height=15,
+    width=20,
+    color_seed=54,
+    xlabel="Time $(\\mu s)$",
+    ylabel="Intensity ",
+    filename="Plots/vac.pdf",
+    plot=False,
+)
+
+plot_data(
+    s_air,
+    height=15,
+    width=20,
+    color_seed=54,
+    xlabel="Time $(\\mu s)$",
+    ylabel="Intensity ",
+    filename="Plots/air.pdf",
+    plot=False,
+)
+
+tau_vac = np.sum(np.array(taus_vac)[:, 0]*np.array(taus_vac)[:, 1]) / np.sum(np.array(taus_vac)[:, 1]), np.std(np.array(taus_vac)[:, 0])
+tau_air = np.sum(np.array(taus_air)[:, 0]*np.array(taus_air)[:, 1]) / np.sum(np.array(taus_air)[:, 1]), np.std(np.array(taus_air)[:, 0])
+
+
+s2_vac_inv = DatasetSpec(
+    x=np.arange(1, len(taus_vac)+1) + 1,
+    y=c/np.array(taus_vac)[:, 0]*1e-6,
+    yerr=c*np.array(taus_vac)[:, 1]/np.array(taus_vac)[:, 0]**2 * 1e-6,
+    marker=".",
+    line="None",
+    label="Vacuum (inv)",
+    color_group="vacuum_inv",
+)
+
+s2_air_inv = DatasetSpec(
+    x=np.arange(1, len(taus_air)+1),
+    y=c/np.array(taus_air)[:, 0]*1e-6,
+    yerr=c*np.array(taus_air)[:, 1]/np.array(taus_air)[:, 0]**2 * 1e-6,
+    marker=".",
+    line="None",
+    label="Air (inv)",
+    color_group="air_inv",
+)
+
+
+plot_data(
+    [s2_vac_inv, s2_air_inv],
+    height=15,
+    width=20,
+    color_seed=50,
+    ylabel="$c/\\tau$ $(m/s^2)$",
+    filename="Plots/tau_inv.pdf",
+    plot=False,
+)
+
+
+s2_vac = DatasetSpec(
+    x=np.arange(1, len(taus_vac)+1) + 1,
+    y=np.array(taus_vac)[:, 0],
+    yerr=np.array(taus_vac)[:, 1],
+    axlines=[(tau_vac[0], 'h')],
+    axlines_label=f"Mean $\\tau_0 = {tau_vac[0]:.3f} ± {tau_vac[1]:.3f} \\, \\mathrm{{\\mu s}}$",
+    confidence=[(tau_vac[0] - tau_vac[1], tau_vac[0] + tau_vac[1])],
+    confidence_label=False,
+    marker=".",
+    line="None",
+    label="Vacuum $\\tau_0$",
+    color_group="vacuum",
+)
+
+s2_air = DatasetSpec(
+    x=np.arange(1, len(taus_air)+1),
+    y=np.array(taus_air)[:, 0],
+    yerr=np.array(taus_air)[:, 1],
+    axlines=[(tau_air[0], 'h')],
+    axlines_label=f"Mean $\\tau = {tau_air[0]:.3f} ± {tau_air[1]:.3f} \\, \\mathrm{{\\mu s}}$",
+    confidence=[(tau_air[0] - tau_air[1], tau_air[0] + tau_air[1])],
+    confidence_label=False,
+    marker=".",
+    line="None",
+    label="Air $\\tau$",
+    color_group="air",
+)
+
+table_data = {
+    "index": np.arange(1, len(taus_vac)+2, dtype=int),
+    "tau_vac": np.append([None], np.array(taus_vac)[:, 0]),
+    "tau_air": np.append(np.array(taus_air)[:, 0], [None]),
+}
+
+headers = {
+    'index': header(label='Dataset', round=False),
+    'tau_vac': header(label='$\\tau_0 \\mathrm{\\, (\\mu s)}$', err=np.append([None], np.array(taus_vac)[:, 1]), intermed=True),
+    'tau_air': header(label='$\\tau \\mathrm{\\, (\\mu s)}$', err=np.array(taus_air)[:, 1], intermed=True),
+}
+
+print_standard_table(
+    data=table_data,
+    headers=headers,
+    caption="Summary of fitted $\\tau$ values for vacuum and air datasets.",
+    label="tab:tau",
+    show=True
+)
+
+
+print(f"\\tau_0 = {print_round_val(tau_vac[0], tau_vac[1])} \\mathrm{{\\, \\mu s}}")
+print(f"\\tau = {print_round_val(tau_air[0], tau_air[1])} \\mathrm{{\\, \\mu s}}")
+
+beta_exp = 1 / c * (1 / tau_air[0] - 1 / tau_vac[0]) * 1e6
+beta_exp_err = 1 / c * np.sqrt((tau_air[1] / tau_air[0] ** 2) ** 2 + (tau_vac[1] / tau_vac[0] ** 2) ** 2) * 1e6
+
+print(f"\\beta_{{th}} = {beta_th * 1e5:.2f} \\times 10^{{-5}} \\, \\mathrm{{m}}^{{-1}}")
+print(f"\\beta_{{exp}} = {print_round_val(beta_exp * 1e5, beta_exp_err * 1e5)} \\times 10^{{-5}} \\, \\mathrm{{m}}^{{-1}}")
+
+plot_data(
+    [s2_vac, s2_air],
+    height=15,
+    width=20,
+    color_seed=50,
+    ylabel="$\\tau \\, (\\mu s)$",
+    filename="Plots/tau.pdf",
+    plot=False,
+)
+
+plot_data(
+    r2_scan_specs,
+    height=15,
+    width=20,
+    color_seed=52,
+    xlabel="Fit start $(\\mu s)$",
+    ylabel="$R^2$",
+    filename="Plots/r2_vs_start.pdf",
+    plot=False,
+)
+
+
+
+
+dtaus_vac = np.array(taus_vac)[:, 1]
+dtaus_air = np.array(taus_air)[:, 1]
+taus_vac = np.array(taus_vac)[:, 0]
+taus_air = np.array(taus_air)[:, 0]
+
+betas = []
+
+
+for i in range(len(taus_air)):
+    b  = (1 / c) * (1 / taus_air[i] - 1 / taus_vac[i]) * 1e6 
+    db = (1 / c) * np.sqrt((dtaus_air[i] / taus_air[i] ** 2) ** 2 + (dtaus_vac[i] / taus_vac[i] ** 2) ** 2) * 1e6
+    betas.append((f"${i+1} \\rightarrow {i+2}$", b, db))
+    
+    if i + 1 < len(taus_vac):
+        b = (1 / c) * (1 / taus_air[i+1] - 1 / taus_vac[i]) * 1e6
+        db = (1 / c) * np.sqrt((dtaus_air[i+1] / taus_air[i+1] ** 2) ** 2 + (dtaus_vac[i] / taus_vac[i] ** 2) ** 2) * 1e6
+        betas.append((f"${i+2} \\rightarrow {i+2}$", b, db))
+
+s_betas = DatasetSpec(
+    x = np.array([b[0] for b in betas]),
+    y = np.array([b[1]*1e5 for b in betas]),
+    yerr = np.array([b[2]*1e5 for b in betas]),
+    marker=".",
+    line="None",
+    label=f"$\\beta_{{exp}}$ from adjacent pairs",
+)
+
+s_betas_avg = DatasetSpec(
+    x = np.array([betas[0][0], betas[-1][0]]),
+    y = np.array([beta_exp*1e5, beta_exp*1e5]),
+    marker="None",
+    line="-.",
+    label="average $\\beta_{{exp}}$",
+)
+
+s_theory = DatasetSpec(
+    x = np.array([betas[0][0], betas[-1][0]]),
+    y = np.array([beta_th*1e5, beta_th*1e5]),
+    line="--",
+    marker="None",
+    label="Theoretical $\\beta_{{th}}$",
+)
+
+plot_data(
+    [s_betas, s_betas_avg, s_theory],
+    height=12,
+    width=16,
+    color_seed=50,
+    ylabel="$\\beta$ $( 10^{-5} \\, m^{-1})$",
+    title="Beta from adjacent pairs of tau values with labels going air $\\rightarrow$ vacuum Dataset",
+    filename="Plots/beta_adjacent.pdf",
+    plot=False,
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+tau_scan_specs_vac = [spec for spec in tau_scan_specs if "vac" in spec.label ]
+tau_scan_specs_air = [spec for spec in tau_scan_specs if "vac" not in spec.label ]
 
 
 def _stats_from_scan_specs(specs_group):
@@ -247,7 +479,7 @@ if vac_stats is not None:
         label="Avg (vac)",
     )
     i_vac = int(np.nanargmin(tau_std_vac))
-    print(f"Min std (vac) at start = {x_vac[i_vac]:.3f} us: sigma = {tau_std_vac[i_vac]:.4f} us")
+    #print(f"Min std (vac) at start = {x_vac[i_vac]:.3f} us: sigma = {tau_std_vac[i_vac]:.4f} us")
 
 s_taus_air = None
 if air_stats is not None:
@@ -264,7 +496,7 @@ if air_stats is not None:
         label="Avg (air)",
     )
     i_air = int(np.nanargmin(tau_std_air))
-    print(f"Min std (air) at start = {x_air[i_air]:.3f} us: sigma = {tau_std_air[i_air]:.4f} us")
+    #print(f"Min std (air) at start = {x_air[i_air]:.3f} us: sigma = {tau_std_air[i_air]:.4f} us")
 
 
 std_specs = []
@@ -293,21 +525,17 @@ if air_stats is not None:
         )
     )
 
-if std_specs:
-    plot_data(
-        std_specs,
-        height=9,
-        width=12,
-        color_seed=52,
-        xlabel="Fit start $(\\mu s)$",
-        ylabel="$\\sigma_\\tau \\, (\\mu s)$",
-        title="Std of tau vs fit start",
-        filename="Plots/tau_std_vs_start.pdf",
-        plot=False,
-    )
-
-
-
+plot_data(
+    std_specs,
+    height=9,
+    width=12,
+    color_seed=52,
+    xlabel="Fit start $(\\mu s)$",
+    ylabel="$\\sigma_\\tau \\, (\\mu s)$",
+    title="Std of tau vs fit start",
+    filename="Plots/tau_std_vs_start.pdf",
+    plot=False,
+)
 
 plot_data(
     tau_scan_specs + [s for s in (s_taus_vac, s_taus_air) if s is not None],
@@ -318,79 +546,5 @@ plot_data(
     ylabel="$\\tau \\, (\\mu s)$",
     title="Scan of fit start time for tau (vac & air averages)",
     filename="Plots/tau_vs_start.pdf",
-    plot=False,
-)
-
-
-
-plot_data(
-    s_vac,
-    height=15,
-    width=20,
-    color_seed=54,
-    xlabel="Time $(\\mu s)$",
-    ylabel="Intensity ",
-    filename="Plots/vac.pdf",
-    plot=False,
-)
-
-plot_data(
-    s_air,
-    height=15,
-    width=20,
-    color_seed=54,
-    xlabel="Time $(\\mu s)$",
-    ylabel="Intensity ",
-    filename="Plots/air.pdf",
-    plot=False,
-)
-
-s2_vac = DatasetSpec(
-    x=np.arange(len(taus_vac)) + 1,
-    y=np.array(taus_vac)[:, 0],
-    yerr=np.array(taus_vac)[:, 1],
-    marker=".",
-    line="None",
-    color_group="vacuum",
-)
-s2_air = DatasetSpec(
-    x=np.arange(len(taus_air)),
-    y=np.array(taus_air)[:, 0],
-    yerr=np.array(taus_air)[:, 1],
-    marker=".",
-    line="None",
-    color_group="air",
-)
-
-tau_vac = np.mean(np.array(taus_vac)[:, 0]), np.std(np.array(taus_vac)[:, 0])
-tau_air = np.mean(np.array(taus_air)[:, 0]), np.std(np.array(taus_air)[:, 0])
-print(f"Average tau in vacuum = {tau_vac[0]:.3f} +- {tau_vac[1]:.3f} us")
-print(f"Average tau in air = {tau_air[0]:.3f} +- {tau_air[1]:.3f} us")
-
-c = 299792458
-beta_exp = 1 / c * (1 / tau_air[0] - 1 / tau_vac[0]) * 1e6
-beta_exp_err = 1 / c * np.sqrt((tau_air[1] / tau_air[0] ** 2) ** 2 + (tau_vac[1] / tau_vac[0] ** 2) ** 2) * 1e6
-
-print(f"Theoretical beta = {beta_th * 1e5:.2f} 10^5 1/m")
-print(f"Experimental beta = {beta_exp * 1e5:.2f} +- {beta_exp_err * 1e5:.2f} 10^5 1/m")
-
-plot_data(
-    [s2_vac, s2_air],
-    height=15,
-    width=20,
-    color_seed=50,
-    ylabel="$\\tau \\, (\\mu s)$",
-    filename="Plots/tau.pdf",
-    plot=False,
-)
-
-plot_data(
-    r2_scan_specs,
-    height=15,
-    width=20,
-    color_seed=52,
-    xlabel="Fit start $(\\mu s)$",
-    ylabel="$R^2$",
-    filename="Plots/r2_vs_start.pdf",
     plot=False,
 )

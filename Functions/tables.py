@@ -1,9 +1,71 @@
 # tables.py
 from dataclasses import is_dataclass
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, TypedDict, Required
 import numpy as np
 import math
 from Functions.help import round_val  
+
+
+class HeaderEntry(TypedDict, total=False):
+    """Schema for one entry in the ``headers`` mapping used by table printers.
+
+    Supported keys:
+    - label: Required LaTeX/header text shown in the table head.
+    - data: Optional explicit data column (falls back to ``data[col_key]``).
+    - err: Optional uncertainty source (scalar, sequence, or dict-like by row).
+    - dark: Optional bool for dark column background.
+    - intermed: Optional bool forwarded to ``round_val(..., intermed=...)``.
+    - repeat: Optional bool; if False, scalar values are shown only in first row.
+    - round: Optional bool; if False, skip ``round_val`` and print raw values.
+    """
+
+    label: Required[str]
+    data: Any
+    err: Any
+    dark: bool
+    intermed: bool
+    repeat: bool
+    round: bool
+
+
+Headers = Dict[str, HeaderEntry]
+HEADER_DEFAULTS: Dict[str, Any] = {
+    "err": 0,
+    "dark": False,
+    "intermed": False,
+    "repeat": True,
+    "round": True,
+}
+
+
+def header(
+    *,
+    label: str,
+    data: Any | None = None,
+    err: Any = 0,
+    dark: bool = False,
+    intermed: bool = False,
+    repeat: bool = True,
+    round: bool = True,
+) -> HeaderEntry:
+    """Use this when defining ``headers`` to keep call sites concise.
+    """
+    entry: HeaderEntry = {
+        "label": label,
+        "err": err,
+        "dark": dark,
+        "intermed": intermed,
+        "repeat": repeat,
+        "round": round,
+    }
+    if data is not None:
+        entry["data"] = data
+    return entry
+
+
+def _header_opt(entry: HeaderEntry, key: str) -> Any:
+    """Read header option with centralized defaults."""
+    return entry.get(key, HEADER_DEFAULTS[key])
 
 # ----------------- small helpers -----------------
 def _is_seq(x) -> bool:
@@ -19,7 +81,7 @@ def _at(x, i, default=None):
         return x[i] if i < len(x) else default
     return x if i == 0 else default
 
-def _normalize_rowwise(data: dict, headers: dict) -> dict:
+def _normalize_rowwise(data: dict, headers: Headers) -> dict:
     """If data is {'A': {'x':..,'y':..}, 'B': {...}}, turn it into column arrays.
        Also auto-build 'name' from the outer keys if requested.
     """
@@ -105,7 +167,7 @@ def _fmt_pair_with_shared_exp(v: float, e: float, p: int | None, *, hi: float = 
 # ----------------- core: STANDARD -----------------
 def print_standard_table(
     data: Dict[str, Any],
-    headers: Dict[str, Dict[str, Any]],
+    headers: Headers,
     header_groups: List[Tuple[str, int]] | None = None,
     caption: str | None = None,
     label: str | None = None,
@@ -115,7 +177,8 @@ def print_standard_table(
 ) -> None:
     """
       - Cells are in math mode: {$ 1.23 \\pm 0.04 $}.
-      - Respects 'label', 'err', 'data', 'dark', 'intermed', 'repeat', 'round'.
+            - ``headers`` supports: label (required), err, data, dark, intermed,
+                repeat, round.
       - 'column_formats' uses S[table-format=...] unless fmt == 'l' (text col).
     """
     if not show:
@@ -128,7 +191,7 @@ def print_standard_table(
     parts = []
     if column_formats:
         for key, fmt in zip(keys, column_formats):
-            dark = headers[key].get("dark", False)
+            dark = _header_opt(headers[key], "dark")
             f = fmt.strip()
             if f.startswith("S["):
                 col = f
@@ -141,7 +204,7 @@ def print_standard_table(
             parts.append(col)
     else:
         for key in keys:
-            dark = headers[key].get("dark", False)
+            dark = _header_opt(headers[key], "dark")
             col = f"S[{si_setup}]" if si_setup else "c"
             if dark:
                 col = f">{{\\columncolor{{black!20}}}}{col}"
@@ -182,9 +245,9 @@ def print_standard_table(
         for k, entry in headers.items():
             try:
                 col = entry.get("data", data.get(k, []))
-                repeat = entry.get("repeat", True)
-                intermed = entry.get("intermed", False)
-                do_round = entry.get("round", True)
+                repeat = _header_opt(entry, "repeat")
+                intermed = _header_opt(entry, "intermed")
+                do_round = _header_opt(entry, "round")
 
                 # value
                 if _is_seq(col):
@@ -199,7 +262,7 @@ def print_standard_table(
                     cell = "{" + val + "}"
                 else:
                     # error extraction (entry-local, like your original)
-                    err = entry.get("err", 0)
+                    err = _header_opt(entry, "err")
                     if isinstance(err, (list, np.ndarray)):
                         err_val = _at(err, i, 0)
                         if isinstance(err_val, (list, np.ndarray)):
@@ -244,7 +307,7 @@ def print_standard_table(
 # ----------------- core: COMPLEX (multi-block) -----------------
 def print_complex_table(
     data: Dict[str, Any] | List[Dict[str, Any]],
-    headers: Dict[str, Dict[str, Any]],
+    headers: Headers,
     header_groups: List[Tuple[str, int]] | None = None,
     caption: str | None = None,
     label: str | None = None,
@@ -265,7 +328,7 @@ def print_complex_table(
     parts = []
     if column_formats:
         for key, fmt in zip(keys, column_formats):
-            dark = headers[key].get("dark", False)
+            dark = _header_opt(headers[key], "dark")
             f = fmt.strip()
             if f.startswith("S["):          
                 col = f
@@ -278,7 +341,7 @@ def print_complex_table(
             parts.append(col)
     else:
         for key in keys:
-            dark = headers[key].get("dark", False)
+            dark = _header_opt(headers[key], "dark")
             col = f"S[{si_setup}]" if si_setup else "c"
             if dark:
                 col = f">{{\\columncolor{{black!20}}}}{col}"
@@ -322,9 +385,9 @@ def print_complex_table(
                 try:
                     entry = headers[k]
                     col = entry.get("data", block.get(k, []))
-                    repeat = entry.get("repeat", True)
-                    intermed = entry.get("intermed", False)
-                    do_round = entry.get("round", True)
+                    repeat = _header_opt(entry, "repeat")
+                    intermed = _header_opt(entry, "intermed")
+                    do_round = _header_opt(entry, "round")
 
                     if _is_seq(col):
                         val = _at(col, i, "")
@@ -340,7 +403,7 @@ def print_complex_table(
                         if isinstance(block_err, dict) and k in block_err:
                             err = block_err[k]
                         else:
-                            err = entry.get("err", 0)
+                            err = _header_opt(entry, "err")
 
                         if isinstance(err, (list, np.ndarray)):
                             err_val = _at(err, i, 0)
