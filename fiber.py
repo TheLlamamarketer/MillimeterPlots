@@ -1,6 +1,9 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import csv
+from itertools import product
 import os
 import shutil
+from typing import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +13,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.colors import LinearSegmentedColormap, PowerNorm
 from numba import njit
 from scipy.integrate import quad
+from scipy.interpolate import griddata
 from scipy.optimize import brentq, newton
 from tqdm import tqdm
 
@@ -22,10 +26,12 @@ from tqdm import tqdm
 class GeometryConfig:
     total_length: float = 0.05
     diameter: float = 330e-6
-    n_points: int = 151
+    n_points: int = 201
 
-    alpha: float = 1
+    displacement: float = 0.0085
     straight_len: float = 0.005
+    
+    half_model: bool = False
 
 
 @dataclass
@@ -42,13 +48,15 @@ class ContactConfig:
     restitution: float = 0.1
     impulse_friction: float = 0.2
     obstacle_radius: float = 0.002
+    obtacles_locations: Sequence[tuple[float, float]] = field(
+        default_factory=lambda: [(0.04, -1), (0.18, 1)]
+    )
     obstacles: np.ndarray = field(
         default_factory=lambda: np.array(
             [
                 [-0.002, 0.022],
                 [0.004, 0.039],
-                [0.003, 0.063],
-                [0.009, 0.076],
+                
             ],
             dtype=np.float64,
         )
@@ -57,15 +65,15 @@ class ContactConfig:
 
 @dataclass
 class TimeConfig:
-    n_steps: int = 5_000_000
-    snap_every: int = 10_000
+    n_steps: int = 3_000_000
+    snap_every: int = 5_000
     chunk_size: int = 50_000
-    time_speedup: float = 1.0
+    time_speedup: float = 0.5
 
 
 @dataclass
 class DampingConfig:
-    zeta_global: float = 0.5
+    zeta_global: float = 0.4
     zeta_axial: float = 0.25
     zeta_bend: float = 1.0
 
@@ -94,6 +102,22 @@ class OutputConfig:
     show_energy_in_animation: bool = True
     show_info_panel: bool = True
 
+    run_zeta_sweep: bool = False
+    zeta_sweep_factors: tuple[float, ...] = (0.01, 0.1, 0.2, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 4.0, 10.0)
+    
+    run_obstacle_sweep: bool = False
+    obstacle_range: Sequence[tuple[float, float]] = field(
+        default_factory=lambda: [
+            (0.04, 0.1),  
+            (0.075, 0.25),
+        ]
+    )
+    obstacle_sweep_refine_passes: int = 0
+    obstacle_sweep_use_cache: bool = True
+    obstacle_sweep_save_cache: bool = True
+    obstacle_sweep_cache_file: str = "obstacle_sweep_cache_330.csv"
+    obstacle_plot_gamma: float = 0.55
+
 
 @dataclass
 class FiberConfig:
@@ -104,6 +128,22 @@ class FiberConfig:
     damping: DampingConfig = field(default_factory=DampingConfig)
     failure: FailureConfig = field(default_factory=FailureConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+
+
+@dataclass
+class SimulationInputs:
+    R0: np.ndarray
+    m: np.ndarray
+    dt: float
+    l0: np.ndarray
+    ks: float
+    kb: float
+    fixed: np.ndarray
+    R_fixed: np.ndarray
+    eta: float
+    c_s_damp: float
+    c_b_damp: float
+    zeta_c: float
 
 
 
@@ -118,24 +158,36 @@ def section_properties(diameter: float):
     return area, inertia
 
 
-def curve_shape(u, alpha):
-    return alpha * (6.0 * u**5 - 15.0 * u**4 + 10.0 * u**3)
+def curve_shape(u):
+    return  3*u**2 - 2*u**3
 
-def curve_shape_derivative(u, alpha):
-    return alpha * (30.0 * u**4 - 60.0 * u**3 + 30.0 * u**2)
-
+def curve_shape_derivative(u):
+    return 6*(u - u**2)
 
 def build_centerline_functions(cfg: FiberConfig):
     g = cfg.geometry
-
-    arc_integrand = lambda u: np.sqrt(1.0 + curve_shape_derivative(u, g.alpha) ** 2)
-    curve_arc_length = quad(arc_integrand, 0.0, 1.0, limit=2000)[0]
 
     mid_length = g.total_length - 2 * g.straight_len
     if mid_length <= 0.0:
         raise ValueError("straight_len must be smaller than total_length / 2")
 
-    scale = mid_length / curve_arc_length
+    min_mid_arc = quad(lambda u: abs(g.displacement * curve_shape_derivative(u)), 0.0, 1.0, limit=2000)[0]
+    if min_mid_arc > mid_length:
+        raise ValueError(
+            "displacement is too large for the available middle arc length; reduce displacement or increase total_length"
+        )
+
+    def mid_arc_length(y_scale):
+        return quad(
+            lambda u: np.sqrt((g.displacement * curve_shape_derivative(u)) ** 2 + y_scale**2),
+            0.0,
+            1.0,
+            limit=2000,
+        )[0]
+
+    y_scale = brentq(lambda s: mid_arc_length(s) - mid_length, 0.0, mid_length)
+    curve_arc_length = mid_arc_length(y_scale)
+
     t_start = g.straight_len / g.total_length
     t_end = 1.0 - g.straight_len / g.total_length
 
@@ -147,8 +199,8 @@ def build_centerline_functions(cfg: FiberConfig):
         0.0,
         np.where(
             t <= t_end,
-            scale * curve_shape(u_of_t(t), g.alpha),
-            scale * curve_shape(1.0, g.alpha),
+            g.displacement * curve_shape(u_of_t(t)),
+            g.displacement * curve_shape(1.0),
         ),
     )
 
@@ -157,8 +209,8 @@ def build_centerline_functions(cfg: FiberConfig):
         t * g.total_length,
         np.where(
             t <= t_end,
-            scale * u_of_t(t) + g.straight_len,
-            scale + (t - t_end) * g.total_length + g.straight_len,
+            y_scale * u_of_t(t) + g.straight_len,
+            y_scale + (t - t_end) * g.total_length + g.straight_len,
         ),
     )
 
@@ -167,7 +219,7 @@ def build_centerline_functions(cfg: FiberConfig):
         0.0,
         np.where(
             t <= t_end,
-            scale * curve_shape_derivative(u_of_t(t), g.alpha) * (g.total_length / mid_length),
+            g.displacement * curve_shape_derivative(u_of_t(t)) * (g.total_length / mid_length),
             0.0,
         ),
     )
@@ -177,7 +229,7 @@ def build_centerline_functions(cfg: FiberConfig):
         g.total_length,
         np.where(
             t <= t_end,
-            scale * (g.total_length / mid_length),
+            y_scale * (g.total_length / mid_length),
             g.total_length,
         ),
     )
@@ -185,7 +237,7 @@ def build_centerline_functions(cfg: FiberConfig):
     info = {
         "curve_arc_length": curve_arc_length,
         "mid_length": mid_length,
-        "scale": scale,
+        "y_scale": y_scale,
         "t_start": t_start,
         "t_end": t_end,
     }
@@ -224,6 +276,9 @@ def parametric_lengths(x, y, t1, n_points, total_length):
     n_segments = n_points - 1
     tol = 1e-12
 
+    if n_segments <= 0:
+        raise ValueError("n_points must be at least 2")
+
     def chord_length(ta, tb):
         return np.hypot(x(tb) - x(ta), y(tb) - y(ta))
 
@@ -250,16 +305,16 @@ def parametric_lengths(x, y, t1, n_points, total_length):
     if r_lo <= 0.0:
         raise RuntimeError("Failed to bracket chord-spacing root at lower bound")
 
-    d_hi = max(total_length / n_segments, 10.0 * d_lo)
+    if n_segments == 1:
+        return np.array([0.0, t1]), chord_length(0.0, t1)
+
+    # Physical upper bound: one segment cannot exceed the full end-to-end chord.
+    d_hi = max(chord_length(0.0, t1) * (1.0 - 1e-12), 10.0 * d_lo)
     r_hi = last_segment_residual(d_hi)
-    n_expand = 0
-    while r_hi > 0.0 and n_expand < 60:
-        d_hi *= 1.5
-        r_hi = last_segment_residual(d_hi)
-        n_expand += 1
+
 
     if r_hi > 0.0:
-        raise RuntimeError("Failed to bracket chord-spacing root")
+        raise RuntimeError("Failed to bracket chord-spacing root within physical chord bounds")
 
     chord_target = brentq(last_segment_residual, d_lo, d_hi)
 
@@ -279,6 +334,11 @@ def parametric_lengths(x, y, t1, n_points, total_length):
 def build_initial_rod(cfg: FiberConfig):
     x, y, dx, dy, curve_info = build_centerline_functions(cfg)
     t1 = curve_length(x, y, cfg.geometry.total_length, dx=dx, dy=dy)
+    
+    if cfg.geometry.half_model:
+        t1 *= 0.5
+        cfg.geometry.n_points = cfg.geometry.n_points//2 +1
+    
     ts, chord_length = parametric_lengths(
         x=x,
         y=y,
@@ -292,25 +352,24 @@ def build_initial_rod(cfg: FiberConfig):
 
 
 def build_obstacles(cfg: FiberConfig, tangential_obstacle_pos=None):
-    centers = cfg.contact.obstacles
-    radii = np.full((centers.shape[0], 1), cfg.contact.obstacle_radius, dtype=np.float64)
+    centers = np.asarray(cfg.contact.obstacles, dtype=np.float64)
 
     if tangential_obstacle_pos is not None:
         x, y, dx, dy, _ = build_centerline_functions(cfg)
+        arr = np.asarray(tangential_obstacle_pos, dtype=np.float64)
         t1 = curve_length(x, y, cfg.geometry.total_length, dx=dx, dy=dy)
-        t = np.array(tangential_obstacle_pos)[:, 0]/t1
-        directions = -np.array(tangential_obstacle_pos)[:, 1]
-        x_h, x_nh = x(t), -dy(t)*directions
-        y_h, y_nh = y(t), dx(t)*directions
+        t = arr[:, 0]/t1
+        directions = -arr[:, 1]
+        h = np.column_stack([x(t), y(t)])
+        tx, ty = dx(t), dy(t)
         
-        # vector notation
-        h = np.column_stack([x_h, y_h])
-        nh = np.column_stack([x_nh, y_nh])
+        norm = np.maximum(np.hypot(tx, ty), 1e-15)
+        nh = np.column_stack((-ty/norm, tx/norm)) * np.sign(directions[:, None])
 
-        norm = np.hypot(x_nh, y_nh)
-        nh /= norm[:, None]
-        
-        centers = h + (cfg.contact.obstacle_radius + 0.5 * cfg.geometry.diameter + 1e-12) * nh
+        offset = 0.5 * cfg.geometry.diameter + cfg.contact.obstacle_radius + 1e-12
+        centers = h + offset * nh
+
+    radii = np.full((centers.shape[0], 1), cfg.contact.obstacle_radius, dtype=np.float64)
         
     obstacles = np.hstack([centers, radii])
 
@@ -1233,6 +1292,426 @@ def compute_failure_history(snapshots, l0, cfg: FiberConfig):
     return failure
 
 
+def run_simulation(cfg: FiberConfig, P_effective, sim: SimulationInputs):
+    return verlet_simulation(
+        R0=sim.R0,
+        m=sim.m,
+        dt=sim.dt,
+        l0=sim.l0,
+        ks=sim.ks,
+        kb=sim.kb,
+        fixed=sim.fixed,
+        R_fixed=sim.R_fixed,
+        cfg=cfg,
+        P_effective=P_effective,
+        eta=sim.eta,
+        c_s_damp=sim.c_s_damp,
+        c_b_damp=sim.c_b_damp,
+        zeta_c=sim.zeta_c,
+    )
+
+
+
+def _refine_axis(axis_values: np.ndarray, passes: int) -> np.ndarray:
+    refined = np.array(axis_values, dtype=np.float64)
+    for _ in range(max(0, int(passes))):
+        mids = 0.5 * (refined[:-1] + refined[1:])
+        refined = np.unique(np.concatenate([refined, mids]))
+    return refined
+
+
+def _param_key(values: Sequence[float]) -> str:
+    return ",".join(f"{float(v):.10f}" for v in values)
+
+
+def _load_obstacle_cache(cache_file: str, n_params: int) -> dict[str, float]:
+    cache: dict[str, float] = {}
+    if not os.path.isfile(cache_file):
+        return cache
+
+    with open(cache_file, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        param_cols = [f"p{i+1}" for i in range(n_params)]
+        for row in reader:
+            try:
+                vals = [float(row[c]) for c in param_cols]
+                tilt = float(row["tilt"])
+            except (KeyError, ValueError):
+                continue
+            cache[_param_key(vals)] = tilt
+    return cache
+
+
+def _save_obstacle_cache(cache_file: str, cache: dict[str, float], n_params: int) -> None:
+    param_cols = [f"p{i+1}" for i in range(n_params)]
+    with open(cache_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([*param_cols, "tilt"])
+        for key in sorted(cache.keys()):
+            vals = [float(v) for v in key.split(",")]
+            writer.writerow([*vals, float(cache[key])])
+
+
+def _run_obstacle_candidate(cfg: FiberConfig, sim: SimulationInputs, sweep_param_locations):
+    cfg_i = replace(
+        cfg,
+        contact=replace(cfg.contact, obtacles_locations=sweep_param_locations),
+    )
+    tangential_i = object_locations(cfg_i.contact, half_model=cfg_i.geometry.half_model)
+    obstacles_plot_i, obstacles_effective_i = build_obstacles(cfg_i, tangential_obstacle_pos=tangential_i)
+
+    R_i, _, snapshots_i, _, step_i = run_simulation(
+        cfg=cfg_i,
+        P_effective=obstacles_effective_i,
+        sim=sim,
+    )
+
+    time_i = (step_i + 1) * sim.dt if len(step_i) else np.array([], dtype=np.float64)
+    tilt_history_i = (
+        np.array([end_straightness_score(S, n_end=10, pos=0) for S in snapshots_i], dtype=np.float64)
+        if len(snapshots_i)
+        else np.array([], dtype=np.float64)
+    )
+
+    return {
+        "obstacle_param_locations": sweep_param_locations,
+        "tangential_obstacle_pos": tangential_i,
+        "obstacle_centers": obstacles_plot_i[:, :2].copy(),
+        "R_final": R_i,
+        "steps": step_i,
+        "time": time_i,
+        "end_tilt_score_final": end_straightness_score(R_i, n_end=10, pos=0),
+        "end_tilt_score_history": tilt_history_i,
+    }
+
+
+def run_obstacle_sweep(cfg: FiberConfig, sim: SimulationInputs):
+    results = []
+
+    base_param_locations = list(cfg.contact.obtacles_locations)
+    ranges = list(cfg.output.obstacle_range)
+    if len(ranges) != len(base_param_locations):
+        raise ValueError("output.obstacle_range must match number of contact.obtacles_locations")
+
+    n_params = len(base_param_locations)
+    n_samples_per_dim = 10
+    axes = [np.linspace(lo, hi, n_samples_per_dim) for (lo, hi) in ranges]
+    axes = [_refine_axis(ax, cfg.output.obstacle_sweep_refine_passes) for ax in axes]
+
+    cache_file = os.path.abspath(cfg.output.obstacle_sweep_cache_file)
+    cache = _load_obstacle_cache(cache_file, n_params) if cfg.output.obstacle_sweep_use_cache else {}
+    cache_updated = False
+
+    for t_values in product(*axes):
+        sweep_param_locations = [
+            (float(t_values[i]), base_param_locations[i][1])
+            for i in range(n_params)
+        ]
+        key = _param_key([v[0] for v in sweep_param_locations])
+
+        if key in cache:
+            results.append(
+                {
+                    "obstacle_param_locations": sweep_param_locations,
+                    "tangential_obstacle_pos": np.empty((0, 2), dtype=np.float64),
+                    "obstacle_centers": np.empty((0, 2), dtype=np.float64),
+                    "R_final": np.empty((0, 2), dtype=np.float64),
+                    "steps": np.array([], dtype=np.int64),
+                    "time": np.array([], dtype=np.float64),
+                    "end_tilt_score_final": float(cache[key]),
+                    "end_tilt_score_history": np.array([], dtype=np.float64),
+                    "from_cache": True,
+                }
+            )
+            continue
+
+        res = _run_obstacle_candidate(cfg, sim, sweep_param_locations)
+        res["from_cache"] = False
+        results.append(res)
+        cache[key] = float(res["end_tilt_score_final"])
+        cache_updated = True
+
+    # Ensure top candidates have full trajectory data for plotting overlays.
+    if results:
+        ranked = sorted(range(len(results)), key=lambda i: results[i]["end_tilt_score_final"])
+        for idx in ranked[: min(8, len(ranked))]:
+            if results[idx].get("from_cache", False):
+                full = _run_obstacle_candidate(cfg, sim, results[idx]["obstacle_param_locations"])
+                full["from_cache"] = False
+                results[idx] = full
+
+    if cfg.output.obstacle_sweep_save_cache and (cache_updated or (cfg.output.obstacle_sweep_use_cache and cache)):
+        _save_obstacle_cache(cache_file, cache, n_params)
+
+    print(f"Obstacle sweep cache: {cache_file} (entries={len(cache)})")
+    return results
+
+
+def plot_obstacle_sweep(results, R0, top_n=6, color_gamma=0.55):
+    if not results:
+        return
+
+    n_params = len(results[0]["obstacle_param_locations"])
+    p1_vals = np.array([r["obstacle_param_locations"][0][0] for r in results], dtype=np.float64)
+    if n_params >= 2:
+        p2_vals = np.array([r["obstacle_param_locations"][1][0] for r in results], dtype=np.float64)
+        param_diff = np.abs(p2_vals - p1_vals)
+    else:
+        # 1D fallback: keep a non-negative distance-like quantity for ranking/plotting.
+        param_diff = np.abs(p1_vals)
+
+    tilt_scores = np.array([r["end_tilt_score_final"] for r in results], dtype=np.float64)
+
+    p_span = max(float(np.max(param_diff) - np.min(param_diff)), 1e-12)
+    t_span = max(float(np.max(tilt_scores) - np.min(tilt_scores)), 1e-12)
+    p_norm = (param_diff - np.min(param_diff)) / p_span
+    t_norm = (tilt_scores - np.min(tilt_scores)) / t_span
+
+    # Higher is better. Keep tilt as the dominant term, with parameter difference as a weaker boost.
+    tilt_good = 1.0 - t_norm
+    tilt_weight = 2.0
+    param_weight = 0.5
+    combined_score = np.power(np.maximum(tilt_good, 1e-12), tilt_weight) * np.power(1.0 + p_norm, param_weight)
+
+    ranked_tilt_idx = np.argsort(tilt_scores)
+    ranked_combined_idx = np.argsort(combined_score)[::-1]
+    top_idx = ranked_tilt_idx[: max(1, min(top_n, len(results)))]
+    best_combined = results[int(ranked_combined_idx[0])]
+    best_tilt = results[int(ranked_tilt_idx[0])]
+    top = [results[int(i)] for i in top_idx]
+
+    # Plot 1/2: tilt landscape and combined-score landscape.
+    fig, axes = plt.subplots(1, 3, figsize=(18.0, 5.3))
+    ax_param, ax_combined, ax_shape = axes
+
+    p1 = p1_vals.tolist()
+    score = tilt_scores
+
+    p2 = p2_vals.tolist()
+
+    pts = np.column_stack((p1, p2))
+    p1_lin = np.linspace(min(p1), max(p1), 220)
+    p2_lin = np.linspace(min(p2), max(p2), 220)
+    P1g, P2g = np.meshgrid(p1_lin, p2_lin)
+
+    Z = griddata(pts, np.asarray(score), (P1g, P2g), method="cubic")
+    if np.isnan(Z).any():
+        Z_lin = griddata(pts, np.asarray(score), (P1g, P2g), method="linear")
+        Z_near = griddata(pts, np.asarray(score), (P1g, P2g), method="nearest")
+        Z = np.where(np.isnan(Z), Z_lin, Z)
+        Z = np.where(np.isnan(Z), Z_near, Z)
+
+    # Tilt score is physically non-negative; clamp interpolation artifacts.
+    Z = np.maximum(Z, 0.0)
+
+    z_valid = Z[np.isfinite(Z)]
+    z_min = float(np.min(z_valid)) if z_valid.size else 0.0
+    z_max = float(np.max(z_valid)) if z_valid.size else 1.0
+    norm = PowerNorm(gamma=max(1e-3, float(color_gamma)), vmin=z_min, vmax=max(z_min + 1e-12, z_max))
+
+    sc = ax_param.pcolormesh(P1g, P2g, Z, shading="auto", cmap="viridis_r", norm=norm)
+    ax_param.scatter(p1, p2, c=score, s=16, cmap="viridis_r", norm=norm, edgecolors="k", linewidths=0.25)
+    ax_param.set_ylabel("param 2 (curve coordinate)")
+
+    C = griddata(pts, np.asarray(combined_score), (P1g, P2g), method="cubic")
+    if np.isnan(C).any():
+        C_lin = griddata(pts, np.asarray(combined_score), (P1g, P2g), method="linear")
+        C_near = griddata(pts, np.asarray(combined_score), (P1g, P2g), method="nearest")
+        C = np.where(np.isnan(C), C_lin, C)
+        C = np.where(np.isnan(C), C_near, C)
+
+    # Combined score is non-negative by construction; clamp interpolation undershoot.
+    C = np.maximum(C, 0.0)
+
+    c_valid = C[np.isfinite(C)]
+    c_min = float(np.min(c_valid)) if c_valid.size else 0.0
+    c_max = float(np.max(c_valid)) if c_valid.size else 1.0
+    gamma_inv = 1.0 / max(1e-3, float(color_gamma))
+    c_norm = PowerNorm(gamma=gamma_inv, vmin=c_min, vmax=max(c_min + 1e-12, c_max))
+
+    sc_c = ax_combined.pcolormesh(P1g, P2g, C, shading="auto", cmap="plasma", norm=c_norm)
+    ax_combined.scatter(p1, p2, c=combined_score, s=16, cmap="plasma", norm=c_norm, edgecolors="k", linewidths=0.25)
+    ax_combined.set_xlabel("param 1 (curve coordinate)")
+    ax_combined.set_ylabel("param 2 (curve coordinate)")
+    ax_combined.set_title("Combined score landscape")
+    ax_combined.grid(True)
+    plt.colorbar(sc_c, ax=ax_combined, pad=0.01, label="combined score")
+
+    ax_param.set_title("Obstacle parameter sweep")
+    ax_param.set_xlabel("param 1 (curve coordinate)")
+    ax_param.grid(True)
+    plt.colorbar(sc, ax=ax_param, pad=0.01, label="final end tilt score (lower is better)")
+
+    # Plot 3: final shape overlays for top candidates.
+    ax_shape.plot(R0[:, 0], R0[:, 1], "--", color="0.35", label="initial")
+    for r in top:
+        params = ", ".join(f"{loc[0]:.3f}" for loc in r["obstacle_param_locations"])
+        ax_shape.plot(r["R_final"][:, 0], r["R_final"][:, 1], label=f"p=[{params}]")
+
+    ax_shape.set_title("Top final shapes")
+    ax_shape.set_xlabel("x (m)")
+    ax_shape.set_ylabel("y (m)")
+    ax_shape.grid(True)
+    ax_shape.set_aspect("equal", adjustable="box")
+    ax_shape.legend(fontsize=7)
+
+    print(
+        "Best by combined score:",
+        [tuple(v) for v in best_combined["obstacle_param_locations"]],
+        f"(diff={abs(best_combined['obstacle_param_locations'][1][0] - best_combined['obstacle_param_locations'][0][0]) if n_params >= 2 else abs(best_combined['obstacle_param_locations'][0][0]):.3f})",
+        f"-> final tilt score={best_combined['end_tilt_score_final']:.3f}",
+        f", combined(mult)={np.max(combined_score):.3f}",
+    )
+    print(
+        "Best by tilt only:",
+        [tuple(v) for v in best_tilt["obstacle_param_locations"]],
+        f"(diff={abs(best_tilt['obstacle_param_locations'][1][0] - best_tilt['obstacle_param_locations'][0][0]) if n_params >= 2 else abs(best_tilt['obstacle_param_locations'][0][0]):.3f})",
+        f"-> final tilt score={best_tilt['end_tilt_score_final']:.3f}",
+    )
+
+    n_report = min(5, len(results))
+    print(f"\nTop {n_report} by tilt only (absolute objective):")
+    for rank, idx in enumerate(ranked_tilt_idx[:n_report], start=1):
+        r = results[int(idx)]
+        pvals = [loc[0] for loc in r["obstacle_param_locations"]]
+        print(
+            f"  {rank}. params={np.round(pvals, 4).tolist()} | "
+            f"tilt={r['end_tilt_score_final']:.3f} | "
+            f"diff={abs(pvals[1] - pvals[0]) if len(pvals) >= 2 else abs(pvals[0]):.3f} | "
+            f"combined(mult)={combined_score[int(idx)]:.3f}"
+        )
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+def run_zeta_global_sweep(
+    cfg: FiberConfig,
+    zeta_values: Sequence[float],
+    sim_base: SimulationInputs,
+    P_effective,
+):
+    results = []
+
+    for zeta in zeta_values:
+        cfg_i = replace(cfg, damping=replace(cfg.damping, zeta_global=float(zeta)))
+        _, _, eta_i, _, _ = compute_damping_coefficients(
+            cfg_i,
+            h=np.mean(sim_base.l0),
+            masses=sim_base.m,
+            area=np.pi * (cfg.geometry.diameter / 2.0) ** 2,
+            inertia=np.pi * (cfg.geometry.diameter / 2.0) ** 4 / 4.0,
+        )
+
+        sim_i = replace(sim_base, eta=eta_i)
+        R_i, _, snapshots_i, energy_i, step_i = run_simulation(
+            cfg=cfg_i,
+            P_effective=P_effective,
+            sim=sim_i,
+        )
+
+        time_i = (step_i + 1) * sim_base.dt if len(step_i) else np.array([], dtype=np.float64)
+        max_disp_i = (
+            np.max(np.linalg.norm(snapshots_i - sim_base.R0[None, :, :], axis=2), axis=1)
+            if len(snapshots_i)
+            else np.array([], dtype=np.float64)
+        )
+
+        results.append(
+            {
+                "zeta_global": float(zeta),
+                "R_final": R_i,
+                "snapshots": snapshots_i,
+                "energy": energy_i,
+                "steps": step_i,
+                "time": time_i,
+                "max_displacement": max_disp_i,
+            }
+        )
+
+    return results
+
+
+def plot_zeta_global_sweep(results, R0):
+    if not results:
+        return
+
+    ref = results[np.argmin([abs(r["zeta_global"] - 1.0) for r in results])]["R_final"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(13.0, 5.2))
+    ax_conv, ax_shape = axes
+
+    for r in results:
+        label = f"zeta_g={r['zeta_global']:.3g}"
+
+        if len(r["time"]) and len(r["max_displacement"]):
+            ax_conv.plot(r["time"], r["max_displacement"] * 1e3, label=label)
+
+        d = np.linalg.norm(r["R_final"] - ref, axis=1)
+        rms = np.sqrt(np.mean(d**2))
+        dmax = np.max(d)
+        steps_done = int(r["steps"][-1]) if len(r["steps"]) else 0
+        print(
+            f"zeta_global={r['zeta_global']:.3g}: "
+            f"steps={steps_done}, "
+            f"RMS(final-ref)={rms:.3e} m, "
+            f"MAX(final-ref)={dmax:.3e} m"
+        )
+
+    ax_conv.set_title("Convergence history")
+    ax_conv.set_xlabel("Time (s)")
+    ax_conv.set_ylabel("Max node displacement from initial (mm)")
+    ax_conv.grid(True)
+    ax_conv.legend(fontsize=8)
+
+    ax_shape.plot(R0[:, 0], R0[:, 1], "--", color="0.35", label="initial")
+    for r in results:
+        ax_shape.plot(r["R_final"][:, 0], r["R_final"][:, 1], label=f"z={r['zeta_global']:.3g}")
+
+    ax_shape.set_title("Final shapes by zeta_global")
+    ax_shape.set_xlabel("x (m)")
+    ax_shape.set_ylabel("y (m)")
+    ax_shape.grid(True)
+    ax_shape.set_aspect("equal", adjustable="box")
+    ax_shape.legend(fontsize=8)
+
+    plt.tight_layout()
+    plt.show()
+    
+    
+    
+    
+def object_locations(parameters, half_model=False):
+    
+    list = []
+    for parameters in parameters.obtacles_locations:
+        list.append(parameters)
+        if not half_model:
+            list.append((1.0 - parameters[0], -parameters[1]))
+
+    return list
+
+
+def end_straightness_score(R, n_end=10, pos=0):
+    n_end = int(max(3, min(n_end, R.shape[0] - 1)))
+
+    dR = R[1:] - R[:-1]
+    seg_len = np.linalg.norm(dR, axis=1)
+    seg_len = np.maximum(seg_len, 1e-15)
+    u = dR / seg_len[:, None]
+
+    def mean_vertical_deviation(units):
+        vertical_alignment = np.clip(np.abs(units[:, 1]), 0.0, 1.0)
+        angle = np.mean(np.arccos(vertical_alignment))
+        return 100.0 * angle / (0.5 * np.pi)
+
+    vertical_deviation = mean_vertical_deviation(u[:n_end]) if pos == 0 else mean_vertical_deviation(u[-n_end:])
+    return vertical_deviation
+
+
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -1242,8 +1721,10 @@ def main():
 
     area, inertia = section_properties(cfg.geometry.diameter)
 
+
     R0, _, chord_length, _ = build_initial_rod(cfg)
     masses, l0, h = build_lumped_masses(R0, cfg.material.density, area)
+    
 
 
     ks, kb, eta, c_s_damp, c_b_damp = compute_damping_coefficients(cfg, h, masses, area, inertia)
@@ -1259,17 +1740,24 @@ def main():
     print(f"Using dt = {dt:.3e}")
     print(f"Mean segment length h = {h:.3e}")
     
-    tangential_obstacle_pos = [(0.08, -1), (0.27, 1), (0.73, -1), (0.92, 1)]
-
+    tangential_obstacle_pos = object_locations(
+        cfg.contact,
+        half_model=cfg.geometry.half_model,
+    )
+    
     obstacles_plot, obstacles_effective = build_obstacles(cfg, tangential_obstacle_pos)
 
     fixed = np.zeros(R0.shape[0], dtype=np.bool_)
     R_fixed = R0.copy()
 
+    if cfg.geometry.half_model:
+        fixed[-1] = True
+        R_fixed[-1] = R0[-1]
+
     if cfg.output.preview_geometry:
         plot_geometry_preview(R0, fixed, R_fixed, obstacles_plot, cfg)
-
-    R, V, snapshots, energy_hist, step_list = verlet_simulation(
+    
+    sim_base = SimulationInputs(
         R0=R0,
         m=masses,
         dt=dt,
@@ -1278,17 +1766,22 @@ def main():
         kb=kb,
         fixed=fixed,
         R_fixed=R_fixed,
-        cfg=cfg,
-        P_effective=obstacles_effective,
         eta=eta,
         c_s_damp=c_s_damp,
         c_b_damp=c_b_damp,
         zeta_c=zeta_c,
     )
 
+    R, V, snapshots, energy_hist, step_list = run_simulation(
+        cfg=cfg,
+        P_effective=obstacles_effective,
+        sim=sim_base,
+    )
+
     failure_index = compute_failure_history(snapshots, l0, cfg)
     max_failure = float(failure_index.max()) if failure_index.size else 0.0
     print(f"Max tensile failure index sigma/sigma_ult = {max_failure:.3f}")
+    print(f"Final end tilt score (0=vertical, 100=horizontal): {end_straightness_score(R):.2f}")
 
     if cfg.output.show_final_state and len(snapshots) > 0:
         plot_final_state(
@@ -1319,6 +1812,43 @@ def main():
         )
         save_animation(ani, cfg)
         plt.show()
+
+
+        if cfg.output.run_obstacle_sweep:
+            sweep_results = run_obstacle_sweep(
+                cfg=cfg,
+                sim=sim_base,
+            )
+            plot_obstacle_sweep(sweep_results, R0, color_gamma=cfg.output.obstacle_plot_gamma)
+
+
+
+
+
+    if cfg.output.run_zeta_sweep:
+        factors = np.asarray(cfg.output.zeta_sweep_factors, dtype=np.float64)
+        zeta_values = np.unique(np.clip(cfg.damping.zeta_global * factors, 1e-9, np.inf))
+
+        cfg_sweep = replace(
+            cfg,
+            output=replace(
+                cfg.output,
+                preview_geometry=False,
+                show_final_state=False,
+                show_energy=False,
+                show_animation=False,
+                save_animation=False,
+            ),
+        )
+
+        print("\nRunning zeta_global sweep:", zeta_values)
+        sweep_results = run_zeta_global_sweep(
+            cfg=cfg_sweep,
+            zeta_values=zeta_values,
+            sim_base=sim_base,
+            P_effective=obstacles_effective,
+        )
+        plot_zeta_global_sweep(sweep_results, R0)
 
 
 if __name__ == "__main__":
