@@ -3,7 +3,7 @@ import csv
 from itertools import product
 import os
 import shutil
-from typing import Sequence
+from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,21 +15,26 @@ from numba import njit
 from scipy.integrate import quad
 from scipy.interpolate import griddata
 from scipy.optimize import brentq, newton
-from tqdm import tqdm
+from numba_progress import ProgressBar
 
 
 # ============================================================
 # Configuration
 # ============================================================
 
+ObstacleLocation = tuple[float, float] | tuple[float, float, float]
+
+
 @dataclass
 class GeometryConfig:
     total_length: float = 0.05
     diameter: float = 330e-6
-    n_points: int = 201
+    n_points: int = 101
 
     displacement: float = 0.0085
-    straight_len: float = 0.005
+    straight_len: float = 0.01
+    straight_len_front: Optional[float] = 0.005
+    straight_len_end: Optional[float] = 0.01
     
     half_model: bool = False
 
@@ -47,33 +52,25 @@ class ContactConfig:
     tangential_damping_ratio: float = 1.0
     restitution: float = 0.1
     impulse_friction: float = 0.2
-    obstacle_radius: float = 0.002
-    obtacles_locations: Sequence[tuple[float, float]] = field(
-        default_factory=lambda: [(0.04, -1), (0.18, 1)]
+    obstacle_radius: float = 0.001
+    obstacle_locations: Sequence[ObstacleLocation] = field(
+        default_factory=lambda: [(0.08, -1), (0.13, 1), (0.65, 1), (0.7, 1, 0.0005), (0.5, -1), (1-0.02, -1)]
     )
-    obstacles: np.ndarray = field(
-        default_factory=lambda: np.array(
-            [
-                [-0.002, 0.022],
-                [0.004, 0.039],
-                
-            ],
-            dtype=np.float64,
-        )
-    )
+    mirror_obstacle_locations: bool = False
+    mirror_reference_t: float = 0.5
+    obstacles: np.ndarray = field(default_factory=lambda: np.empty((0, 2), dtype=np.float64))
 
 
 @dataclass
 class TimeConfig:
-    n_steps: int = 3_000_000
-    snap_every: int = 5_000
-    chunk_size: int = 50_000
-    time_speedup: float = 0.5
+    n_steps: int = 1_000_000
+    snap_every: int = 10_000
+    time_speedup: float = 2.0
 
 
 @dataclass
 class DampingConfig:
-    zeta_global: float = 0.4
+    zeta_global: float = 2.0
     zeta_axial: float = 0.25
     zeta_bend: float = 1.0
 
@@ -112,7 +109,7 @@ class OutputConfig:
             (0.075, 0.25),
         ]
     )
-    obstacle_sweep_refine_passes: int = 0
+    obstacle_sweep_refine_passes: int = 2
     obstacle_sweep_use_cache: bool = True
     obstacle_sweep_save_cache: bool = True
     obstacle_sweep_cache_file: str = "obstacle_sweep_cache_330.csv"
@@ -146,6 +143,24 @@ class SimulationInputs:
     zeta_c: float
 
 
+MM_PER_M = 1e3
+
+
+def to_mm(values):
+    return np.asarray(values) * MM_PER_M
+
+
+def to_mm_points(points):
+    pts = np.asarray(points)
+    return pts * MM_PER_M
+
+
+def to_mm_obstacles(obstacles):
+    obs = np.asarray(obstacles).copy()
+    obs[:, :3] *= MM_PER_M
+    return obs
+
+
 
 
 # ============================================================
@@ -167,9 +182,12 @@ def curve_shape_derivative(u):
 def build_centerline_functions(cfg: FiberConfig):
     g = cfg.geometry
 
-    mid_length = g.total_length - 2 * g.straight_len
+    straight_len_front = g.straight_len if g.straight_len_front is None else g.straight_len_front
+    straight_len_end = g.straight_len if g.straight_len_end is None else g.straight_len_end
+
+    mid_length = g.total_length - straight_len_front - straight_len_end
     if mid_length <= 0.0:
-        raise ValueError("straight_len must be smaller than total_length / 2")
+        raise ValueError("straight_len_front + straight_len_end must be smaller than total_length")
 
     min_mid_arc = quad(lambda u: abs(g.displacement * curve_shape_derivative(u)), 0.0, 1.0, limit=2000)[0]
     if min_mid_arc > mid_length:
@@ -188,8 +206,8 @@ def build_centerline_functions(cfg: FiberConfig):
     y_scale = brentq(lambda s: mid_arc_length(s) - mid_length, 0.0, mid_length)
     curve_arc_length = mid_arc_length(y_scale)
 
-    t_start = g.straight_len / g.total_length
-    t_end = 1.0 - g.straight_len / g.total_length
+    t_start = straight_len_front / g.total_length
+    t_end = 1.0 - straight_len_end / g.total_length
 
     def u_of_t(t):
         return (t - t_start) / (t_end - t_start)
@@ -209,8 +227,8 @@ def build_centerline_functions(cfg: FiberConfig):
         t * g.total_length,
         np.where(
             t <= t_end,
-            y_scale * u_of_t(t) + g.straight_len,
-            y_scale + (t - t_end) * g.total_length + g.straight_len,
+            y_scale * u_of_t(t) + straight_len_front,
+            y_scale + (t - t_end) * g.total_length + straight_len_front,
         ),
     )
 
@@ -352,24 +370,47 @@ def build_initial_rod(cfg: FiberConfig):
 
 
 def build_obstacles(cfg: FiberConfig, tangential_obstacle_pos=None):
-    centers = np.asarray(cfg.contact.obstacles, dtype=np.float64)
+    if tangential_obstacle_pos is None:
+        tangential_obstacle_pos = object_locations(
+            cfg.contact,
+            half_model=cfg.geometry.half_model,
+        )
 
-    if tangential_obstacle_pos is not None:
+    centers = np.asarray(cfg.contact.obstacles, dtype=np.float64)
+    radii = np.full((centers.shape[0], 1), cfg.contact.obstacle_radius, dtype=np.float64)
+
+    if tangential_obstacle_pos is not None and len(tangential_obstacle_pos) > 0:
         x, y, dx, dy, _ = build_centerline_functions(cfg)
-        arr = np.asarray(tangential_obstacle_pos, dtype=np.float64)
+
+        t_values = []
+        side_values = []
+        radius_values = []
+        for loc in tangential_obstacle_pos:
+            if len(loc) < 2:
+                raise ValueError("Each obstacle location must contain at least (t_pos, side)")
+            t_values.append(float(loc[0]))
+            side_values.append(float(loc[1]))
+            radius_values.append(float(loc[2]) if len(loc) >= 3 else float(cfg.contact.obstacle_radius))
+
+        t_values = np.asarray(t_values, dtype=np.float64)
+        side_values = np.asarray(side_values, dtype=np.float64)
+        radius_values = np.asarray(radius_values, dtype=np.float64)
+
         t1 = curve_length(x, y, cfg.geometry.total_length, dx=dx, dy=dy)
-        t = arr[:, 0]/t1
-        directions = -arr[:, 1]
+        t = t_values / t1
+        directions = -side_values
         h = np.column_stack([x(t), y(t)])
         tx, ty = dx(t), dy(t)
         
         norm = np.maximum(np.hypot(tx, ty), 1e-15)
         nh = np.column_stack((-ty/norm, tx/norm)) * np.sign(directions[:, None])
 
-        offset = 0.5 * cfg.geometry.diameter + cfg.contact.obstacle_radius + 1e-12
-        centers = h + offset * nh
+        offset = 0.5 * cfg.geometry.diameter + radius_values + 1e-12
+        centers = h + offset[:, None] * nh
+        radii = radius_values[:, None]
 
-    radii = np.full((centers.shape[0], 1), cfg.contact.obstacle_radius, dtype=np.float64)
+    if centers.ndim != 2 or centers.shape[1] != 2:
+        raise ValueError("Obstacle centers must have shape (N, 2)")
         
     obstacles = np.hstack([centers, radii])
 
@@ -520,21 +561,39 @@ def set_equal_data_limits(ax, x_arrays, y_arrays, pad_fraction=0.05):
 
 
 def plot_geometry_preview(R0, fixed, R_fixed, obstacles, cfg: FiberConfig):
+    R0_mm = to_mm_points(R0)
+    R_fixed_mm = to_mm_points(R_fixed)
+    obstacles_mm = to_mm_obstacles(obstacles)
+    mirror_axis_x_mm = (cfg.geometry.displacement+ cfg.geometry.diameter/2) * MM_PER_M 
+
+    R0_mirrored_mm = R0_mm.copy()
+    R0_mirrored_mm[:, 0] = 2.0 * mirror_axis_x_mm - R0_mm[:, 0]
+
     fig, ax = plt.subplots(figsize=(8.5, 7))
 
     preview = PolyCollection(
-        ribbon_quads(R0, cfg.geometry.diameter),
+        ribbon_quads(R0_mm, cfg.geometry.diameter * MM_PER_M),
         facecolors="tab:blue",
         edgecolors="none",
         label="fiber",
     )
+    preview_mirrored = PolyCollection(
+        ribbon_quads(R0_mirrored_mm, cfg.geometry.diameter * MM_PER_M),
+        facecolors="tab:cyan",
+        edgecolors="none",
+        alpha=0.6,
+        label="mirrored initial",
+    )
     ax.add_collection(preview)
+    ax.add_collection(preview_mirrored)
 
-    add_fixed_nodes(ax, R_fixed[fixed])
-    add_obstacles(ax, obstacles)
-    set_equal_data_limits(ax, [R0[:, 0]], [R0[:, 1]])
+    add_fixed_nodes(ax, R_fixed_mm[fixed])
+    add_obstacles(ax, obstacles_mm)
+    set_equal_data_limits(ax, [R0_mm[:, 0], R0_mirrored_mm[:, 0]], [R0_mm[:, 1], R0_mirrored_mm[:, 1]])
 
     ax.set_title("Initial geometry")
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("y (mm)")
     ax.grid(True)
     ax.legend()
     plt.tight_layout()
@@ -542,29 +601,36 @@ def plot_geometry_preview(R0, fixed, R_fixed, obstacles, cfg: FiberConfig):
 
 
 def plot_final_state(R0, R, fixed, R_fixed, obstacles, failure_index_final, cfg: FiberConfig):
+    R0_mm = to_mm_points(R0)
+    R_mm = to_mm_points(R)
+    R_fixed_mm = to_mm_points(R_fixed)
+    obstacles_mm = to_mm_obstacles(obstacles)
+
     cmap = fiber_cmap()
     norm = failure_norm(cfg)
 
     fig, ax = plt.subplots(figsize=(8.5, 7))
 
     fiber = PolyCollection(
-        ribbon_quads(R, cfg.geometry.diameter),
+        ribbon_quads(R_mm, cfg.geometry.diameter * MM_PER_M),
         cmap=cmap,
         norm=norm,
         edgecolors="none",
     )
     fiber.set_array(failure_index_final)
 
-    ax.plot(R0[:, 0], R0[:, 1], "--", label="initial", alpha=0.5)
+    ax.plot(R0_mm[:, 0], R0_mm[:, 1], "--", label="initial", alpha=0.5)
     ax.add_collection(fiber)
-    add_fixed_nodes(ax, R_fixed[fixed])
-    add_obstacles(ax, obstacles)
-    set_equal_data_limits(ax, [R0[:, 0], R[:, 0]], [R0[:, 1], R[:, 1]])
+    add_fixed_nodes(ax, R_fixed_mm[fixed])
+    add_obstacles(ax, obstacles_mm)
+    set_equal_data_limits(ax, [R0_mm[:, 0], R_mm[:, 0]], [R0_mm[:, 1], R_mm[:, 1]])
 
     cbar = plt.colorbar(fiber, ax=ax, pad=0.01)
     cbar.set_label("Failure index $(\\sigma / \\sigma_{\\mathrm{ult}})$", rotation=270, labelpad=15)
 
     ax.set_title("Final state")
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("y (mm)")
     ax.grid(True)
     ax.legend()
     plt.tight_layout()
@@ -609,10 +675,15 @@ def create_animation(
     dt,
     cfg: FiberConfig,
 ):
+    snapshots_mm = to_mm_points(snapshots)
+    R0_mm = to_mm_points(R0)
+    R_fixed_mm = to_mm_points(R_fixed)
+    obstacles_mm = to_mm_obstacles(obstacles)
+
     cmap = fiber_cmap()
     norm = failure_norm(cfg)
 
-    total_length = np.sum(np.linalg.norm(np.diff(snapshots, axis=1), axis=2), axis=1)
+    total_length_mm = np.sum(np.linalg.norm(np.diff(snapshots_mm, axis=1), axis=2), axis=1)
 
     fig = plt.figure(figsize=(11.5, 7))
     gs = fig.add_gridspec(
@@ -640,15 +711,17 @@ def create_animation(
         animated=True,
     )
 
-    x_arrays = [R0[:, 0]] + [S[:, 0] for S in snapshots]
-    y_arrays = [R0[:, 1]] + [S[:, 1] for S in snapshots]
+    x_arrays = [R0_mm[:, 0]] + [S[:, 0] for S in snapshots_mm]
+    y_arrays = [R0_mm[:, 1]] + [S[:, 1] for S in snapshots_mm]
     set_equal_data_limits(ax_main, x_arrays, y_arrays)
 
     ax_main.set_title("Fiber dynamics")
+    ax_main.set_xlabel("x (mm)")
+    ax_main.set_ylabel("y (mm)")
     ax_main.grid(True)
-    ax_main.plot(R0[:, 0], R0[:, 1], "--", alpha=0.35, label="initial")
-    add_obstacles(ax_main, obstacles)
-    add_fixed_nodes(ax_main, R_fixed[fixed])
+    ax_main.plot(R0_mm[:, 0], R0_mm[:, 1], "--", alpha=0.35, label="initial")
+    add_obstacles(ax_main, obstacles_mm)
+    add_fixed_nodes(ax_main, R_fixed_mm[fixed])
 
     fiber = PolyCollection([], cmap=cmap, norm=norm, edgecolors="none", animated=True)
     ax_main.add_collection(fiber)
@@ -676,7 +749,7 @@ def create_animation(
 
     def init():
         fiber.set_verts([])
-        fiber.set_array(np.empty(0, dtype=R0.dtype))
+        fiber.set_array(np.empty(0, dtype=R0_mm.dtype))
         info_text.set_text("")
         kinetic_line.set_data([], [])
         potential_line.set_data([], [])
@@ -685,8 +758,8 @@ def create_animation(
         return fiber, info_text, kinetic_line, potential_line, time_marker
 
     def update(frame):
-        Ri = snapshots[frame]
-        fiber.set_verts(ribbon_quads(Ri, cfg.geometry.diameter))
+        Ri_mm = snapshots_mm[frame]
+        fiber.set_verts(ribbon_quads(Ri_mm, cfg.geometry.diameter * MM_PER_M))
         fiber.set_array(failure_index[frame])
 
         Es, Eb, Ek, Ep = energy_hist[frame]
@@ -696,7 +769,7 @@ def create_animation(
         info_text.set_text(
             f"step   = {step}\n"
             f"time   = {format_time_value(t_elapsed)}\n"
-            f"length = {total_length[frame] * 1e3:.3f} mm\n"
+            f"length = {total_length_mm[frame]:.3f} mm\n"
             f"FImax  = {failure_index[frame].max():.3f}\n"
             f"Es     = {Es:.3e} J\n"
             f"Eb     = {Eb:.3e} J\n"
@@ -772,13 +845,14 @@ def save_animation(ani, cfg: FiberConfig):
 @njit(cache=True)
 def compute_forces(
     R,
+    F,
     V,
     l0,
     ks,
     kb,
     kc,
-    zeta_c,
-    zeta_t,
+    c_n,
+    c_t,
     mu,
     eta,
     c_s_damp,
@@ -787,7 +861,7 @@ def compute_forces(
     P,
     fixed,
 ):
-    F = np.zeros_like(R)
+    F[:, :] = 0.0
     N = R.shape[0]
 
     for i in range(N):
@@ -811,17 +885,14 @@ def compute_forces(
                 vn = V[i, 0] * nx + V[i, 1] * ny
                 vt = V[i, 0] * tx + V[i, 1] * ty
 
-                c_n = 2.0 * zeta_c * np.sqrt(kc * m[i])
-                c_t = 2.0 * zeta_t * np.sqrt(kc * m[i])
-
                 fn = kc * delta
                 if vn < 0.0:
-                    fn -= c_n * vn
+                    fn -= c_n[i] * vn
 
                 if fn < 0.0:
                     fn = 0.0
 
-                ft_trial = -c_t * vt
+                ft_trial = -c_t[i] * vt
                 ft_limit = mu * fn
 
                 if ft_trial > ft_limit:
@@ -1061,7 +1132,7 @@ def resolve_node_circle_contacts(R_old, R, V, P, fixed, m, mu_imp):
 # ============================================================
 
 @njit(cache=True)
-def _verlet_chunk(
+def _verlet_loop(
     R,
     V,
     l0,
@@ -1078,39 +1149,42 @@ def _verlet_chunk(
     fixed,
     R_fixed,
     dt,
+    n_steps,
     snap_every,
-    step_offset,
-    n_chunk,
     max_snaps,
     snapshots,
     energy_hist,
     step_list,
-    ns,
     P,
-    quiet_count,
     v_tol,
     min_steps_for_convergence,
     mu_imp,
+    pbar,
     quiet_needed=5,
 ):
     N = R.shape[0]
     converged = False
-    steps_done = 0
+    ns = 0
+    quiet_count = 0
+    
+    R_old = np.empty_like(R)
+    F = np.empty_like(R)
+    
+    c_n = 2.0 * zeta_c * np.sqrt(kc * m)
+    c_t = 2.0 * zeta_t * np.sqrt(kc * m)
 
-    for local_step in range(n_chunk):
-        step = step_offset + local_step
-        steps_done = local_step + 1
+    for step in range(n_steps):
         vmax = 0.0
 
         F = compute_forces(
-            R, V, l0, ks, kb, kc, zeta_c, zeta_t, mu, eta, c_s_damp, c_b_damp, m, P, fixed
+            R, F, V, l0, ks, kb, kc, c_n, c_t, mu, eta, c_s_damp, c_b_damp, m, P, fixed
         )
 
         for i in range(N):
             V[i, 0] += 0.5 * dt * F[i, 0] / m[i]
             V[i, 1] += 0.5 * dt * F[i, 1] / m[i]
 
-        R_old = R.copy()
+        R_old[:, :] = R
 
         for i in range(N):
             R[i, 0] += dt * V[i, 0]
@@ -1122,7 +1196,7 @@ def _verlet_chunk(
         R, V = resolve_node_circle_contacts(R_old, R, V, P, fixed, m, mu_imp)
 
         F = compute_forces(
-            R, V, l0, ks, kb, kc, zeta_c, zeta_t, mu, eta, c_s_damp, c_b_damp, m, P, fixed
+            R, F, V, l0, ks, kb, kc, c_n, c_t, mu, eta, c_s_damp, c_b_damp, m, P, fixed
         )
 
         for i in range(N):
@@ -1157,7 +1231,9 @@ def _verlet_chunk(
                 converged = True
                 break
 
-    return R, V, ns, converged, quiet_count, steps_done
+            pbar.update()
+
+    return R, V, ns, converged
 
 
 def verlet_simulation(
@@ -1181,7 +1257,6 @@ def verlet_simulation(
 
     n_steps = int(cfg.time.n_steps)
     snap_every = int(cfg.time.snap_every)
-    chunk_size = int(cfg.time.chunk_size)
 
     max_snaps = n_steps // snap_every + 1
     N = R0.shape[0]
@@ -1193,51 +1268,36 @@ def verlet_simulation(
     h = np.mean(l0)
     v_tol = 1e-2 * h / max(snap_every * dt, 1e-30)
 
-    with tqdm(total=n_steps, desc="Simulating", unit="steps") as pbar:
-        quiet_count = 0
-        step_offset = 0
-        ns = 0
-
-        while step_offset < n_steps:
-            n_chunk = min(chunk_size, n_steps - step_offset)
-
-            R, V, ns, converged, quiet_count, steps_done = _verlet_chunk(
-                R=R,
-                V=V,
-                l0=l0,
-                ks=ks,
-                kb=kb,
-                kc=cfg.contact.contact_stiffness,
-                zeta_c=zeta_c,
-                zeta_t=cfg.contact.tangential_damping_ratio,
-                mu=cfg.contact.friction,
-                eta=eta,
-                c_s_damp=c_s_damp,
-                c_b_damp=c_b_damp,
-                m=m,
-                fixed=fixed,
-                R_fixed=R_fixed,
-                dt=dt,
-                snap_every=snap_every,
-                step_offset=step_offset,
-                n_chunk=n_chunk,
-                max_snaps=max_snaps,
-                snapshots=snapshots,
-                energy_hist=energy_hist,
-                step_list=step_list,
-                ns=ns,
-                P=P_effective,
-                quiet_count=quiet_count,
-                v_tol=v_tol,
-                min_steps_for_convergence=5 * snap_every,
-                mu_imp=cfg.contact.impulse_friction,
-            )
-
-            pbar.update(steps_done)
-            step_offset += steps_done
-
-            if converged:
-                break
+    with ProgressBar(total=(n_steps // snap_every), desc="Simulating", unit="snaps") as pbar:
+        R, V, ns, converged = _verlet_loop(
+            R=R,
+            V=V,
+            l0=l0,
+            ks=ks,
+            kb=kb,
+            kc=cfg.contact.contact_stiffness,
+            zeta_c=zeta_c,
+            zeta_t=cfg.contact.tangential_damping_ratio,
+            mu=cfg.contact.friction,
+            eta=eta,
+            c_s_damp=c_s_damp,
+            c_b_damp=c_b_damp,
+            m=m,
+            fixed=fixed,
+            R_fixed=R_fixed,
+            dt=dt,
+            n_steps=n_steps,
+            snap_every=snap_every,
+            max_snaps=max_snaps,
+            snapshots=snapshots,
+            energy_hist=energy_hist,
+            step_list=step_list,
+            P=P_effective,
+            v_tol=v_tol,
+            min_steps_for_convergence=5 * snap_every,
+            mu_imp=cfg.contact.impulse_friction,
+            pbar=pbar,
+        )
 
     return R, V, snapshots[:ns], energy_hist[:ns], step_list[:ns]
 
@@ -1355,7 +1415,7 @@ def _save_obstacle_cache(cache_file: str, cache: dict[str, float], n_params: int
 def _run_obstacle_candidate(cfg: FiberConfig, sim: SimulationInputs, sweep_param_locations):
     cfg_i = replace(
         cfg,
-        contact=replace(cfg.contact, obtacles_locations=sweep_param_locations),
+        contact=replace(cfg.contact, obstacle_locations=sweep_param_locations),
     )
     tangential_i = object_locations(cfg_i.contact, half_model=cfg_i.geometry.half_model)
     obstacles_plot_i, obstacles_effective_i = build_obstacles(cfg_i, tangential_obstacle_pos=tangential_i)
@@ -1388,10 +1448,10 @@ def _run_obstacle_candidate(cfg: FiberConfig, sim: SimulationInputs, sweep_param
 def run_obstacle_sweep(cfg: FiberConfig, sim: SimulationInputs):
     results = []
 
-    base_param_locations = list(cfg.contact.obtacles_locations)
+    base_param_locations = list(cfg.contact.obstacle_locations)
     ranges = list(cfg.output.obstacle_range)
     if len(ranges) != len(base_param_locations):
-        raise ValueError("output.obstacle_range must match number of contact.obtacles_locations")
+        raise ValueError("output.obstacle_range must match number of contact.obstacle_locations")
 
     n_params = len(base_param_locations)
     n_samples_per_dim = 10
@@ -1403,10 +1463,13 @@ def run_obstacle_sweep(cfg: FiberConfig, sim: SimulationInputs):
     cache_updated = False
 
     for t_values in product(*axes):
-        sweep_param_locations = [
-            (float(t_values[i]), base_param_locations[i][1])
-            for i in range(n_params)
-        ]
+        sweep_param_locations = []
+        for i in range(n_params):
+            base_loc = base_param_locations[i]
+            if len(base_loc) >= 3:
+                sweep_param_locations.append((float(t_values[i]), base_loc[1], base_loc[2]))
+            else:
+                sweep_param_locations.append((float(t_values[i]), base_loc[1]))
         key = _param_key([v[0] for v in sweep_param_locations])
 
         if key in cache:
@@ -1452,13 +1515,42 @@ def plot_obstacle_sweep(results, R0, top_n=6, color_gamma=0.55):
         return
 
     n_params = len(results[0]["obstacle_param_locations"])
+    if n_params != 2:
+        ranked = sorted(results, key=lambda r: r["end_tilt_score_final"])
+        top = ranked[: max(1, min(top_n, len(ranked)))]
+
+        fig, ax_shape = plt.subplots(1, 1, figsize=(7.8, 5.2))
+        R0_mm = to_mm_points(R0)
+        ax_shape.plot(R0_mm[:, 0], R0_mm[:, 1], "--", color="0.35", label="initial")
+        for r in top:
+            params = ", ".join(f"{loc[0] * MM_PER_M:.3f}" for loc in r["obstacle_param_locations"])
+            R_final_mm = to_mm_points(r["R_final"])
+            ax_shape.plot(R_final_mm[:, 0], R_final_mm[:, 1], label=f"p=[{params}] mm")
+
+        ax_shape.set_title("Top final shapes")
+        ax_shape.set_xlabel("x (mm)")
+        ax_shape.set_ylabel("y (mm)")
+        ax_shape.grid(True)
+        ax_shape.set_aspect("equal", adjustable="box")
+        ax_shape.legend(fontsize=7)
+        plt.tight_layout()
+        plt.show()
+
+        print(
+            f"Obstacle sweep summary: {n_params} obstacle parameters configured. "
+            "2D landscape plots are only shown when exactly 2 parameters are swept."
+        )
+        for rank, r in enumerate(top, start=1):
+            pvals = [loc[0] for loc in r["obstacle_param_locations"]]
+            print(
+                f"  {rank}. params(mm)={np.round(to_mm(pvals), 4).tolist()} | "
+                f"tilt={r['end_tilt_score_final']:.3f}"
+            )
+        return
+
     p1_vals = np.array([r["obstacle_param_locations"][0][0] for r in results], dtype=np.float64)
-    if n_params >= 2:
-        p2_vals = np.array([r["obstacle_param_locations"][1][0] for r in results], dtype=np.float64)
-        param_diff = np.abs(p2_vals - p1_vals)
-    else:
-        # 1D fallback: keep a non-negative distance-like quantity for ranking/plotting.
-        param_diff = np.abs(p1_vals)
+    p2_vals = np.array([r["obstacle_param_locations"][1][0] for r in results], dtype=np.float64)
+    param_diff = np.abs(p2_vals - p1_vals)
 
     tilt_scores = np.array([r["end_tilt_score_final"] for r in results], dtype=np.float64)
 
@@ -1484,10 +1576,10 @@ def plot_obstacle_sweep(results, R0, top_n=6, color_gamma=0.55):
     fig, axes = plt.subplots(1, 3, figsize=(18.0, 5.3))
     ax_param, ax_combined, ax_shape = axes
 
-    p1 = p1_vals.tolist()
+    p1 = to_mm(p1_vals).tolist()
     score = tilt_scores
 
-    p2 = p2_vals.tolist()
+    p2 = to_mm(p2_vals).tolist()
 
     pts = np.column_stack((p1, p2))
     p1_lin = np.linspace(min(p1), max(p1), 220)
@@ -1511,7 +1603,7 @@ def plot_obstacle_sweep(results, R0, top_n=6, color_gamma=0.55):
 
     sc = ax_param.pcolormesh(P1g, P2g, Z, shading="auto", cmap="viridis_r", norm=norm)
     ax_param.scatter(p1, p2, c=score, s=16, cmap="viridis_r", norm=norm, edgecolors="k", linewidths=0.25)
-    ax_param.set_ylabel("param 2 (curve coordinate)")
+    ax_param.set_ylabel("param 2 (mm)")
 
     C = griddata(pts, np.asarray(combined_score), (P1g, P2g), method="cubic")
     if np.isnan(C).any():
@@ -1531,41 +1623,43 @@ def plot_obstacle_sweep(results, R0, top_n=6, color_gamma=0.55):
 
     sc_c = ax_combined.pcolormesh(P1g, P2g, C, shading="auto", cmap="plasma", norm=c_norm)
     ax_combined.scatter(p1, p2, c=combined_score, s=16, cmap="plasma", norm=c_norm, edgecolors="k", linewidths=0.25)
-    ax_combined.set_xlabel("param 1 (curve coordinate)")
-    ax_combined.set_ylabel("param 2 (curve coordinate)")
+    ax_combined.set_xlabel("param 1 (mm)")
+    ax_combined.set_ylabel("param 2 (mm)")
     ax_combined.set_title("Combined score landscape")
     ax_combined.grid(True)
     plt.colorbar(sc_c, ax=ax_combined, pad=0.01, label="combined score")
 
     ax_param.set_title("Obstacle parameter sweep")
-    ax_param.set_xlabel("param 1 (curve coordinate)")
+    ax_param.set_xlabel("param 1 (mm)")
     ax_param.grid(True)
     plt.colorbar(sc, ax=ax_param, pad=0.01, label="final end tilt score (lower is better)")
 
     # Plot 3: final shape overlays for top candidates.
-    ax_shape.plot(R0[:, 0], R0[:, 1], "--", color="0.35", label="initial")
+    R0_mm = to_mm_points(R0)
+    ax_shape.plot(R0_mm[:, 0], R0_mm[:, 1], "--", color="0.35", label="initial")
     for r in top:
-        params = ", ".join(f"{loc[0]:.3f}" for loc in r["obstacle_param_locations"])
-        ax_shape.plot(r["R_final"][:, 0], r["R_final"][:, 1], label=f"p=[{params}]")
+        params = ", ".join(f"{loc[0] * MM_PER_M:.3f}" for loc in r["obstacle_param_locations"])
+        R_final_mm = to_mm_points(r["R_final"])
+        ax_shape.plot(R_final_mm[:, 0], R_final_mm[:, 1], label=f"p=[{params}] mm")
 
     ax_shape.set_title("Top final shapes")
-    ax_shape.set_xlabel("x (m)")
-    ax_shape.set_ylabel("y (m)")
+    ax_shape.set_xlabel("x (mm)")
+    ax_shape.set_ylabel("y (mm)")
     ax_shape.grid(True)
     ax_shape.set_aspect("equal", adjustable="box")
     ax_shape.legend(fontsize=7)
 
     print(
         "Best by combined score:",
-        [tuple(v) for v in best_combined["obstacle_param_locations"]],
-        f"(diff={abs(best_combined['obstacle_param_locations'][1][0] - best_combined['obstacle_param_locations'][0][0]) if n_params >= 2 else abs(best_combined['obstacle_param_locations'][0][0]):.3f})",
+        [tuple((v[0] * MM_PER_M, v[1])) for v in best_combined["obstacle_param_locations"]],
+        f"(diff={abs(best_combined['obstacle_param_locations'][1][0] - best_combined['obstacle_param_locations'][0][0]) * MM_PER_M if n_params >= 2 else abs(best_combined['obstacle_param_locations'][0][0]) * MM_PER_M:.3f} mm)",
         f"-> final tilt score={best_combined['end_tilt_score_final']:.3f}",
         f", combined(mult)={np.max(combined_score):.3f}",
     )
     print(
         "Best by tilt only:",
-        [tuple(v) for v in best_tilt["obstacle_param_locations"]],
-        f"(diff={abs(best_tilt['obstacle_param_locations'][1][0] - best_tilt['obstacle_param_locations'][0][0]) if n_params >= 2 else abs(best_tilt['obstacle_param_locations'][0][0]):.3f})",
+        [tuple((v[0] * MM_PER_M, v[1])) for v in best_tilt["obstacle_param_locations"]],
+        f"(diff={abs(best_tilt['obstacle_param_locations'][1][0] - best_tilt['obstacle_param_locations'][0][0]) * MM_PER_M if n_params >= 2 else abs(best_tilt['obstacle_param_locations'][0][0]) * MM_PER_M:.3f} mm)",
         f"-> final tilt score={best_tilt['end_tilt_score_final']:.3f}",
     )
 
@@ -1575,9 +1669,9 @@ def plot_obstacle_sweep(results, R0, top_n=6, color_gamma=0.55):
         r = results[int(idx)]
         pvals = [loc[0] for loc in r["obstacle_param_locations"]]
         print(
-            f"  {rank}. params={np.round(pvals, 4).tolist()} | "
+            f"  {rank}. params(mm)={np.round(to_mm(pvals), 4).tolist()} | "
             f"tilt={r['end_tilt_score_final']:.3f} | "
-            f"diff={abs(pvals[1] - pvals[0]) if len(pvals) >= 2 else abs(pvals[0]):.3f} | "
+            f"diff={abs(pvals[1] - pvals[0]) * MM_PER_M if len(pvals) >= 2 else abs(pvals[0]) * MM_PER_M:.3f} mm | "
             f"combined(mult)={combined_score[int(idx)]:.3f}"
         )
 
@@ -1655,8 +1749,8 @@ def plot_zeta_global_sweep(results, R0):
         print(
             f"zeta_global={r['zeta_global']:.3g}: "
             f"steps={steps_done}, "
-            f"RMS(final-ref)={rms:.3e} m, "
-            f"MAX(final-ref)={dmax:.3e} m"
+            f"RMS(final-ref)={rms * MM_PER_M:.3e} mm, "
+            f"MAX(final-ref)={dmax * MM_PER_M:.3e} mm"
         )
 
     ax_conv.set_title("Convergence history")
@@ -1665,13 +1759,15 @@ def plot_zeta_global_sweep(results, R0):
     ax_conv.grid(True)
     ax_conv.legend(fontsize=8)
 
-    ax_shape.plot(R0[:, 0], R0[:, 1], "--", color="0.35", label="initial")
+    R0_mm = to_mm_points(R0)
+    ax_shape.plot(R0_mm[:, 0], R0_mm[:, 1], "--", color="0.35", label="initial")
     for r in results:
-        ax_shape.plot(r["R_final"][:, 0], r["R_final"][:, 1], label=f"z={r['zeta_global']:.3g}")
+        R_final_mm = to_mm_points(r["R_final"])
+        ax_shape.plot(R_final_mm[:, 0], R_final_mm[:, 1], label=f"z={r['zeta_global']:.3g}")
 
     ax_shape.set_title("Final shapes by zeta_global")
-    ax_shape.set_xlabel("x (m)")
-    ax_shape.set_ylabel("y (m)")
+    ax_shape.set_xlabel("x (mm)")
+    ax_shape.set_ylabel("y (mm)")
     ax_shape.grid(True)
     ax_shape.set_aspect("equal", adjustable="box")
     ax_shape.legend(fontsize=8)
@@ -1682,15 +1778,30 @@ def plot_zeta_global_sweep(results, R0):
     
     
     
-def object_locations(parameters, half_model=False):
-    
-    list = []
-    for parameters in parameters.obtacles_locations:
-        list.append(parameters)
-        if not half_model:
-            list.append((1.0 - parameters[0], -parameters[1]))
+def object_locations(contact_cfg, half_model=False):
+    locs = []
+    for loc in contact_cfg.obstacle_locations:
+        if len(loc) < 2:
+            raise ValueError("Each obstacle location must contain at least (t_pos, side)")
 
-    return list
+        t_pos = float(loc[0])
+        side = float(loc[1])
+        radius = float(loc[2]) if len(loc) >= 3 else None
+
+        if radius is None:
+            locs.append((t_pos, side))
+        else:
+            locs.append((t_pos, side, radius))
+
+        if (not half_model) and contact_cfg.mirror_obstacle_locations:
+            mirrored_t = 2.0 * contact_cfg.mirror_reference_t - t_pos
+            if 0.0 <= mirrored_t <= 1.0:
+                if radius is None:
+                    locs.append((mirrored_t, -side))
+                else:
+                    locs.append((mirrored_t, -side, radius))
+    return locs
+
 
 
 def end_straightness_score(R, n_end=10, pos=0):
@@ -1738,7 +1849,7 @@ def main():
         f"dt_contact={dt_limits['dt_contact']:.3e}"
     )
     print(f"Using dt = {dt:.3e}")
-    print(f"Mean segment length h = {h:.3e}")
+    print(f"Mean segment length h = {h * MM_PER_M:.3e} mm")
     
     tangential_obstacle_pos = object_locations(
         cfg.contact,
@@ -1746,6 +1857,7 @@ def main():
     )
     
     obstacles_plot, obstacles_effective = build_obstacles(cfg, tangential_obstacle_pos)
+    print(f"Obstacles (center x, center y, radius) [mm]:\n{to_mm_obstacles(obstacles_plot)}")
 
     fixed = np.zeros(R0.shape[0], dtype=np.bool_)
     R_fixed = R0.copy()
