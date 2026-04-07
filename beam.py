@@ -199,15 +199,13 @@ def beam_curve_slope(x, beam_model):
     return slope[0] if len(slope) == 1 else slope
 
 
-L = 5
-a = 3
-P = 0.01
 
-p1 = np.array([forces[0][0], 0, -1])
-p2 = np.array([forces[2][0], 0, -1])
-p3 = np.array([forces[1][0], beam_curve(forces[1][0], beam_model), 1])
-
-constraints = [p1, p2, p3]
+constraints = []
+for i, force in enumerate(forces):
+    x_pos = force[0]
+    y_pos = beam_curve(x_pos, beam_model)
+    direction = -1 if len(force) == 1 else -np.sign(float(force[1]))
+    constraints.append(np.array([x_pos, y_pos, direction]))
 
 x = np.linspace(-L, L, 1000)
 
