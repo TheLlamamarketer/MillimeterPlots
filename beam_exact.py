@@ -388,7 +388,7 @@ def beam_curve_slope(x, beam_model):
 a = 4
 L = 5
 
-forces = [[-a, 1],[-2, -0.9], [0, 1], [2, -0.9], [a, 1]]
+forces = [[-a],[-2, -1], [0], [2, -1], [a]]
 end_constraints = [-L, L]
 
 sol, beam_model = solve_beam(

@@ -151,7 +151,7 @@ def find_Hg_peaks(lam_Hg, A_Hg, Hg_lines):
         headers_hg,
         caption="Literaturwerte $\\lambda_{real}$ und gemessene Wellenlängen $\\lambda_{nom}$ der Quecksilberlinien sowie deren kalibrierte Werte $\\lambda_{fit}$ und Differenzen.",
         label="tab:ruby_hg_lines",
-        show=True
+        show=False
     )
     
     print(f"RMS of differences: {np.sqrt(np.mean((results_line_hg.eval(x=lambda_peaks) - Hg_lines)**2)):.4g} nm")
@@ -209,6 +209,7 @@ s_hg = DatasetSpec(
     axlines_color="green",
     axlines_label="Known Hg lines",
     axlines_intervals=[(-0.05, peak) for peak in A_Hg[peaks_hg]],
+
 )
 
 s_peaks = DatasetSpec(
@@ -235,7 +236,7 @@ plot_data(
     filename=f'Plots/Hg_lines.pdf',
     height=15,
     color_seed=89,
-    plot=False
+    plot=True
 )
 
 

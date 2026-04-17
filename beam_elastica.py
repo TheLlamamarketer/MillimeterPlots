@@ -1,24 +1,97 @@
 import numpy as  np
-import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
-from scipy.optimize import least_squares
+from scipy.optimize import least_squares, minimize, NonlinearConstraint
+from numba import njit
+
+from beam_elastica_plot import plot_solution
 
 
 
-def full_ode(s, z, B):
-    # z = [x, y, theta, M, H, V] and thus function returns the derivative as a function f(z) = dz/ds. The first three components are the kinematic equations, and the last three are the equilibrium equations.
+@njit(cache=True)
+def ode_rhs(z, B):
     x, y, theta, M, H, V = z
-    dx = np.cos(theta)
-    dy = np.sin(theta)
-    dtheta = M/B
-    dM = H*np.sin(theta) - V*np.cos(theta)
-    dH = 0.0
-    dV = 0.0
-    return np.array([dx, dy, dtheta, dM, dH, dV])
+    dz = np.empty(6, dtype=np.float64)
+    dz[0] = np.cos(theta)
+    dz[1] = np.sin(theta)
+    dz[2] = M / B
+    dz[3] = H * np.sin(theta) - V * np.cos(theta)
+    dz[4] = 0.0
+    dz[5] = 0.0
+    return dz
+
+def encode_interfaces(interfaces, total_length):
+    m = len(interfaces)
+    x_targets = np.full(m, np.nan, dtype=np.float64)
+    y_targets = np.full(m, np.nan, dtype=np.float64)
+    theta_targets = np.full(m, np.nan, dtype=np.float64)
+    kind = np.full(m, -1, dtype=np.int64)  # 0 for load, 1 for constraint
+    force_mag = np.zeros((m, 2), dtype=np.float64)
+    normal_vec = np.zeros((m, 2), dtype=np.float64)
+    has_normal = np.zeros(m, dtype=np.int64)
+
+    for i, interface in enumerate(interfaces):
+        
+        if "axis" in interface:
+            axis = interface["axis"]
+            if axis == "x":
+                x_value = interface.get("value", interface.get("x", np.nan))
+                x_targets[i] = float(x_value)
+            elif axis == "y":
+                y_value = interface.get("value", interface.get("y", np.nan))
+                y_targets[i] = float(y_value)
+            else:
+                raise ValueError("axis must be 'x' or 'y'.")
+        else:
+            if "x" in interface:
+                x_targets[i] = float(interface["x"])
+            if "y" in interface:
+                y_targets[i] = float(interface["y"])
+            if "theta" in interface:
+                theta_targets[i] = float(interface["theta"])
+        
+        if interface.get("type") == "con":
+            kind[i] = 1
+        else:
+            kind[i] = 0
+            if "Py" in interface:
+                force_mag[i, 0] = 1.0
+                force_mag[i, 1] = float(interface["Py"])
+            else:
+                force_mag[i, 0] = 0.0
+                force_mag[i, 1] = float(interface.get("force", 0.0))
+
+        if "normal" in interface:
+            n = np.asarray(interface["normal"], dtype=float)
+            if n.shape != (2,):
+                raise ValueError("normal must be a 2-vector [nx, ny].")
+            n_norm = float(np.hypot(n[0], n[1]))
+            if n_norm <= 0.0:
+                raise ValueError("normal vector must be non-zero.")
+            normal_vec[i, 0] = n[0] / n_norm
+            normal_vec[i, 1] = n[1] / n_norm
+            has_normal[i] = 1
+
+    # Segment-length priors only seed the rho reparameterization.
+    # If some interfaces are y-only (no x target), use a uniform prior.
+    x_all_finite = np.all(np.isfinite(x_targets))
+    if x_all_finite:
+        xs = np.empty(m + 2, dtype=np.float64)
+        xs[0] = 0.0
+        xs[1:-1] = x_targets
+        xs[-1] = float(total_length)
+        dx = np.diff(xs)
+        if np.all(dx > 0.0):
+            ref_lengths = dx
+        else:
+            ref_lengths = np.full(m + 1, float(total_length) / (m + 1), dtype=np.float64)
+    else:
+        ref_lengths = np.full(m + 1, float(total_length) / (m + 1), dtype=np.float64)
+
+    return x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, ref_lengths
 
 def integrate_segment(z0, length, B):
     # Integrates the ODE and uses the initial conditions z0 to compute the state at the end of the segment. z(l) = z0 + integral of dz/ds from 0 to l.
-    sol = solve_ivp(lambda s, z: full_ode(s, z, B), [0, length], z0, method='RK45', rtol=1e-8, atol=1e-10)
+    sol = solve_ivp(lambda s, z: ode_rhs(z, B), [0, length], z0, method='DOP853', rtol=1e-8, atol=1e-10)
     if not sol.success:
         raise RuntimeError("ODE integration failed: " + sol.message)
     return sol.y[:, -1] 
@@ -30,421 +103,450 @@ def point_force(z_l, Px, Py):
     z_new[5] -= Py
     return z_new
 
-def sample_segment(z0, length, B, points=200):
-    s_eval = np.linspace(0.0, float(length), int(points))
-    sol = solve_ivp(
-        lambda s, z: full_ode(s, z, B),
-        [0.0, float(length)],
-        np.asarray(z0, dtype=float),
-        t_eval=s_eval,
-        method='RK45',
-        rtol=1e-8,
-        atol=1e-10,
-    )
-    if not sol.success:
-        raise RuntimeError("ODE integration failed: " + sol.message)
-    return sol.y
+
+@njit(cache=True)
+def lengths_segments(rho, total_length, ref_lengths, min_lengths):
+    n = ref_lengths.size
+    q = np.empty(n, dtype=np.float64)
+    q[0] = ref_lengths[0]
+    s = q[0]
+    for i in range(1, n):
+        q[i] = ref_lengths[i] * np.exp(rho[i - 1])
+        s += q[i]
+
+    remaining = total_length - np.sum(min_lengths)
+
+    out = np.empty(n, dtype=np.float64)
+    scale = remaining / s
+    for i in range(n):
+        out[i] = min_lengths[i] + q[i] * scale
+    return out
+
+@njit(cache=True)
+def rk4_step(z, h, B):
+    k1 = ode_rhs(z, B)
+    k2 = ode_rhs(z + 0.5 * h * k1, B)
+    k3 = ode_rhs(z + 0.5 * h * k2, B)
+    k4 = ode_rhs(z + h * k3, B)
+    return z + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+@njit(cache=True)
+def integrate_segment_rk4(z0, length, B, n_steps):
+    z = z0.copy()
+    if n_steps < 1:
+        n_steps = 1
+    h = length / n_steps
+    for _ in range(n_steps):
+        z = rk4_step(z, h, B)
+    return z
 
 
-def build_interface_forces(segment_ends, lambda_tail, interfaces):
-    lambda_tail = np.asarray(lambda_tail, dtype=float)
+@njit(cache=True)
+def forward_march(u, total_length, B, x_targets, y_targets, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, n_steps):
+    m = x_targets.size
+    n_seg = m + 1
+    n_rho = n_seg - 1
+
+    x0 = u[0]
+    y0 = u[1]
+    theta0 = u[2]
+    rho = u[3:3 + n_rho]
+    lambdas = u[3 + n_rho:]
+
+    lengths = lengths_segments(rho, total_length, ref_lengths, min_lengths)
+
+    starts = np.empty((n_seg, 6), dtype=np.float64)
+    ends = np.empty((n_seg, 6), dtype=np.float64)
+    forces = np.zeros((m, 2), dtype=np.float64)
+
+    z = np.array([x0, y0, theta0, 0.0, 0.0, 0.0], dtype=np.float64)
     lam_idx = 0
-    forces = []
-    for i, interface in enumerate(interfaces):
-        if interface.get("type") == "con":
-            theta_i = segment_ends[i][2]
-            lam_i = lambda_tail[lam_idx]
-            
-            Px = -lam_i * np.sin(theta_i)
-            Py = lam_i * np.cos(theta_i)
-            
-            lam_idx += 1
-        
-        else:
-            theta_i = segment_ends[i][2]
-            F = float(interface.get("force", 0.0))
 
-            Px = -F * np.sin(theta_i)
-            Py =  F * np.cos(theta_i)
+    for i in range(n_seg):
+        starts[i] = z.copy()
+        z_end = integrate_segment_rk4(z, lengths[i], B, n_steps)
+        ends[i] = z_end
 
-        forces.append((Px, Py))
-    
-    return forces
-        
+        if i < m:
+            theta = z_end[2]
+            if kind[i] == 1:
+                lam = lambdas[lam_idx]
+                if has_normal[i] > 0:
+                    Px = lam * normal_vec[i, 0]
+                    Py = lam * normal_vec[i, 1]
+                else:
+                    Px = -lam * np.sin(theta)
+                    Py =  lam * np.cos(theta)
+                lam_idx += 1
+            else:
+                if has_normal[i] > 0:
+                    F = force_mag[i, 1]
+                    Px = F * normal_vec[i, 0]
+                    Py = F * normal_vec[i, 1]
+                elif force_mag[i, 0] > 0.5:
+                    Py = force_mag[i, 1]
+                    Px = -Py * np.tan(theta)
+                else:
+                    F = force_mag[i, 1]
+                    Px = -F * np.sin(theta)
+                    Py =  F * np.cos(theta)
 
-def solved_interface_forces(solution, segment_ends, interfaces):
-    n_segments = len(interfaces) + 1
-    state_block = 6 * n_segments
-    rho_block = n_segments - 1
-    force_tail = solution[state_block + rho_block:]
-    return np.array(build_interface_forces(segment_ends, force_tail, interfaces), dtype=float)
+            forces[i, 0] = Px
+            forces[i, 1] = Py
 
-def residuals(u, total_length, B, interfaces, length_weight=0):
-    n_interfaces = len(interfaces)
-    n_segments = n_interfaces + 1
-    state_block = 6 * n_segments
-    rho_block = n_segments - 1
-    lambdas_block = len([iface for iface in interfaces if iface.get("type") == "con"])
+            z = z_end.copy()
+            z[4] -= Px
+            z[5] -= Py
 
-    states = [np.asarray(u[i:i+6], dtype=float) for i in range(0, 6*n_segments, 6)]
-    rho = np.asarray(u[state_block: state_block + rho_block], dtype=float)
-    lambdas = np.asarray(u[state_block + rho_block:], dtype=float)
-
-    ref_lengths = reference_lengths(total_length, interfaces)
-    lengths = lengths_segments(rho, total_length, ref_lengths)
-    segment_ends = [integrate_segment(states[i], lengths[i], B) for i in range(n_segments)]
-    forces = build_interface_forces(segment_ends, lambdas, interfaces)
-    
-    
-    R = []
-    R.extend(states[0][3:6])
-    R.append(states[0][0])  # x at start should be 0
-
-    
-    for i in range(n_interfaces):
-        
-        x_target = float(interfaces[i].get("x", 0.0))
-        R.append(segment_ends[i][0] - x_target)
-
-        if interfaces[i].get("type") == "con":
-            y_target = float(interfaces[i].get("y", 0.0))
-            R.append(segment_ends[i][1] - y_target)
-    
-        Px, Py = forces[i]
-        
-        z_post = point_force(segment_ends[i], Px, Py)
-        R.extend(z_post - states[i+1])
-        
-    R.extend(segment_ends[-1][3:6])
-    
-    R.extend(np.sqrt(length_weight) * (lengths - ref_lengths))
-    
-    return np.array(R, dtype=float)
-
+    return starts, ends, forces, lengths
 
 def reference_lengths(total_length, interfaces):
-    xs = [0.0] + [float(iface["x"]) for iface in interfaces] + [float(total_length)]
+    xs = [0.0] + [float(interface["x"]) for interface in interfaces] + [float(total_length)]
     xs = np.asarray(xs, dtype=float)
     if np.any(np.diff(xs) <= 0.0):
         raise ValueError("x positions must be strictly increasing inside [0, total_length].")
     return np.diff(xs)
 
-def lengths_segments(rho, total_length, ref_lengths):
-    rho = np.asarray(rho, dtype=float)
-    ref_lengths = np.asarray(ref_lengths, dtype=float)
 
-    q = np.concatenate(([1.0], np.exp(rho)))
-    q = ref_lengths * q
-    return float(total_length) * q / np.sum(q)
+
+def make_residual(total_length, B, interfaces, n_steps=120, end_margin=0.0):
+    x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, ref_lengths = encode_interfaces(interfaces, total_length)
+    has_x = np.isfinite(x_targets)
+    has_y = np.isfinite(y_targets)
+    has_theta = np.isfinite(theta_targets)
+
+    end_margin = float(end_margin)
+    if end_margin < 0.0:
+        raise ValueError("end_margin must be non-negative.")
+
+    n_seg = len(interfaces) + 1
+    min_lengths = build_min_lengths(total_length, n_seg, end_margin)
+
+    n_interface_eq = 0
+    for i in range(len(interfaces)):
+        n_targets = int(has_x[i]) + int(has_y[i]) + int(has_theta[i])
+        if n_targets == 0:
+            raise ValueError("Each interface must constrain at least one of x, y, or theta.")
+        if kind[i] == 1:
+            n_interface_eq += n_targets
+        else:
+            n_interface_eq += 1
+
+    n_eq = n_interface_eq + 3
+    target_specs = (
+        (has_x, x_targets, 0),
+        (has_y, y_targets, 1),
+        (has_theta, theta_targets, 2),
+    )
+
+    def residuals(u):
+        starts, ends, forces, lengths = forward_march(
+            u, total_length, B,
+            x_targets, y_targets, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths,
+            n_steps,
+        )
+
+        R = np.empty(n_eq, dtype=float)
+        k = 0
+        for i in range(len(interfaces)):
+            if kind[i] == 1:
+                for has_target, targets, col in target_specs:
+                    if has_target[i]:
+                        R[k] = ends[i, col] - targets[i]
+                        k += 1
+            else:
+                for has_target, targets, col in target_specs:
+                    if has_target[i]:
+                        R[k] = ends[i, col] - targets[i]
+                        k += 1
+                        break
+
+        R[k:k+3] = ends[-1, 3:6]
+        return R
+
+    return residuals
+
+
 
 def count_unknowns(interfaces):
     return sum(1 for interface in interfaces if interface.get("type") == "con")
 
-
-def beam_profile(solution, total_length, interfaces, B, points_per_segment=200):
+def unpack_reduced_unknowns(u, interfaces):
     n_interfaces = len(interfaces)
     n_segments = n_interfaces + 1
-    state_block = 6 * n_segments
-    rho = np.asarray(solution[state_block: state_block + n_segments - 1], dtype=float)
-    lengths = lengths_segments(rho, total_length, reference_lengths(total_length, interfaces))
-    
-    
-    states = [np.asarray(solution[i:i+6], dtype=float) for i in range(0, 6*n_segments, 6)]
+    n_rho = n_segments - 1
+    n_lambda = count_unknowns(interfaces)
+
+    x0 = u[0]
+    y0 = u[1]
+    theta0 = u[2]
+
+    rho = np.asarray(u[3:3 + n_rho], dtype=float)
+    lambdas = np.asarray(u[3 + n_rho:3 + n_rho + n_lambda], dtype=float)
+
+    return x0, y0, theta0, rho, lambdas
+
+
+@njit(cache=True)
+def sample_segment(z0, length, B, points=200):
+    n = int(points)
+    if n < 2:
+        n = 2
+
+    out = np.empty((6, n), dtype=np.float64)
+    z = z0.copy()
+    out[:, 0] = z
+
+    h = length / (n - 1)
+    for i in range(1, n):
+        z = rk4_step(z, h, B)
+        out[:, i] = z
+
+    return out
+
+def beam_profile(solution, total_length, interfaces, B, points_per_segment=200, end_margin=0.0):
+    x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, ref_lengths = encode_interfaces(interfaces, total_length)
+    min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
+
+    starts, ends, forces, lengths = forward_march(solution, total_length, B,
+            x_targets, y_targets, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, 400)
 
     sampled_segments = [
-        sample_segment(states[i], lengths[i], B, points=points_per_segment)
-        for i in range(n_segments)
+        sample_segment(starts[i], lengths[i], B, points=points_per_segment)
+        for i in range(len(lengths))
     ]
-
-    segment_ends = [seg[:, -1] for seg in sampled_segments]
 
     x = np.concatenate([seg[0] for seg in sampled_segments])
     y = np.concatenate([seg[1] for seg in sampled_segments])
     theta = np.concatenate([seg[2] for seg in sampled_segments])
-    
-    forces = solved_interface_forces(solution, segment_ends, interfaces)
 
-    joints = np.array(
-        [[seg[0][-1], seg[1][-1]] for seg in sampled_segments[:-1]],
-        dtype=float,
-    )
+    joints = np.array([[ends[i][0], ends[i][1]] for i in range(len(interfaces))], dtype=float)
 
     return x, y, theta, joints, forces
 
+def build_min_lengths(total_length, n_seg, end_margin=0.0):
+    end_margin = float(end_margin)
+    if end_margin < 0.0:
+        raise ValueError("end_margin must be non-negative.")
+    if n_seg >= 2 and 2.0 * end_margin >= float(total_length):
+        raise ValueError("require 2 * end_margin < total_length")
 
-class DraggablePoints:
-    def __init__(self, fig, ax, scatter, interfaces, total_length, B, replot_callback=None):
-        self.fig = fig
-        self.ax = ax
-        self.scatter = scatter
-        self.points = np.asarray(scatter.get_offsets(), dtype=float).copy()
-        self.active_index = None
-        self.drag_start = None
-        
-        self.interfaces = interfaces
-        self.total_length = total_length
-        self.B = B
-        self.replot_callback = replot_callback
-
-        self._cid_press = fig.canvas.mpl_connect('button_press_event', self.on_press)
-        self._cid_move = fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
-        self._cid_release = fig.canvas.mpl_connect('button_release_event', self.on_release)
-
-    def on_press(self, event):
-        if event.inaxes != self.ax:
-            return
-        if event.xdata is None or event.ydata is None:
-            return
-
-        # Find closest point
-        distances = np.hypot(self.points[:, 0] - event.xdata, self.points[:, 1] - event.ydata)
-        self.active_index = int(np.argmin(distances))
-        dist = distances[self.active_index]
-        
-        if dist > 0.2:  # Tolerance for clicking near a point
-            self.active_index = None
-            return
-        
-        self.drag_start = np.array([event.xdata, event.ydata], dtype=float)
-
-    def on_motion(self, event):
-        if self.active_index is None:
-            return
-        if event.xdata is None or event.ydata is None:
-            return
-
-        current_pos = np.array([event.xdata, event.ydata], dtype=float)
-        delta = current_pos - self.drag_start
-        self.points[self.active_index] += delta
-        self.drag_start = current_pos
-        
-        self.scatter.set_offsets(self.points)
-        self.fig.canvas.draw()
-
-    def on_release(self, event):
-        if self.active_index is None:
-            return
-
-        idx = self.active_index
-        new_x = self.points[idx, 0]
-        new_y = self.points[idx, 1]
-        
-        # Update interface position
-        self.interfaces[idx]["x"] = float(new_x)
-        if self.interfaces[idx].get("type") == "con":
-            self.interfaces[idx]["y"] = float(new_y)
-        
-        # Re-solve if callback is provided
-        if self.replot_callback is not None:
-            try:
-                self.replot_callback(self.interfaces)
-            except Exception as e:
-                print(f"Error re-solving: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        self.active_index = None
-        self.drag_start = None
+    min_lengths = np.zeros(n_seg, dtype=float)
+    if n_seg >= 2 and end_margin > 0.0:
+        min_lengths[0] = end_margin
+        min_lengths[-1] = end_margin
+    return min_lengths
 
 
-def enable_interactive_points(fig, ax, scatter, interfaces, total_length, B, replot_callback=None):
-    return DraggablePoints(fig, ax, scatter, interfaces, total_length, B, replot_callback=replot_callback)
 
-def plot_solution(solution, total_length, interfaces, B):
-    x, y, theta, joints, forces = beam_profile(
-        solution,
-        total_length,
-        interfaces,
-        B,
-        points_per_segment=400,
-    )
 
-    print("All joint forces (Px, Py):")
-    for i, (px, py) in enumerate(forces, start=1):
-        print(f"  joint {i}: Px={px:.6g}, Py={py:.6g}")
+def bending_energy(solution, total_length, B, interfaces, points_per_segment=200, end_margin=0.0):
+    x_targ, y_targ, theta_targ, kind, force_mag, normal_vec, has_normal, ref_lengths = encode_interfaces(interfaces, total_length)
+    min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
+    starts, ends, forces, lengths = forward_march(solution, total_length, B, x_targ, y_targ, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, n_steps=400)
     
+    energy = 0.0
+    for i in range(len(lengths)):
+        seg = sample_segment(starts[i], lengths[i], B, points=points_per_segment)
+        M = seg[3]
+        ds = lengths[i] / (M.size - 1)
+        energy +=  np.sum(M**2) * ds
+    return 0.5 * energy / B
 
-    fig, ax = plt.subplots(figsize=(12, 10))
 
-    line, = ax.plot(x, y, color='blue', label='Beam deflection')
-
-    point_colors = ['red' if iface.get("type") == "con" else 'green' for iface in interfaces]
-    point_sizes = [60 if iface.get("type") == "con" else 40 for iface in interfaces]
-    joint_scatter = ax.scatter(
-        joints[:, 0],
-        joints[:, 1],
-        c=point_colors,
-        s=point_sizes,
-        zorder=3,
-        marker='o',
-    )
-    
-    # Initial arrow collection
-    arrows = []
-    max_force = np.max(np.linalg.norm(joints - forces, axis=1))
-    if max_force <= 0.0:
-        max_force = 1.0
-    for i in range(len(joints)):
-        arrow = ax.arrow(joints[i, 0], joints[i, 1], forces[i, 0]/max_force, forces[i, 1]/max_force, 
-                         color='orange', width=0.02, head_width=0.1)
-        arrows.append(arrow)
-    
-    ax.set_ylabel('Deflection (y)', color='blue')
-    ax.tick_params(axis='y', labelcolor='blue')
-    
-    x_data = np.concatenate([x, joints[:, 0]])
-    y_data = np.concatenate([y, joints[:, 1]])
-
-    finite_xy = np.isfinite(x_data) & np.isfinite(y_data)
-    if np.any(finite_xy):
-        x_plot = x_data[finite_xy]
-        y_plot = y_data[finite_xy]
-        x_min, x_max = np.min(x_plot), np.max(x_plot)
-        y_min, y_max = np.min(y_plot), np.max(y_plot)
-    else:
-        x_min, x_max = float(np.min(x)), float(np.max(x))
-        y_min, y_max = -1.0, 1.0
-
-    x_mid = 0.5 * (x_min + x_max)
-    y_mid = 0.5 * (y_min + y_max)
-    half_span = 0.5 * max(x_max - x_min, y_max - y_min)
-    if not np.isfinite(half_span) or half_span <= 0.0:
-        half_span = 1.0
-
-    ax.set_xlim(x_mid - half_span, x_mid + half_span)
-    ax.set_ylim(y_mid - half_span, y_mid + half_span)
-    ax.set_aspect('equal')
-    ax.grid()
-    ax.legend()
-    
-    def replot_callback(updated_interfaces):
-        """Re-solve and update the plot when points are dragged."""
-        nonlocal arrows
-        
-        # Re-solve with updated interfaces
-        sol_new = solve_segments(total_length, B, updated_interfaces)
-        x_new, y_new, theta_new, joints_new, forces_new = beam_profile(
-            sol_new.x,
-            total_length,
-            updated_interfaces,
-            B,
-            points_per_segment=400,
-        )
-        
-        # Update line
-        line.set_data(x_new, y_new)
-        
-        # Update scatter points
-        joint_scatter.set_offsets(joints_new)
-        
-        # Remove old arrows
-        for arrow in arrows:
-            arrow.remove()
-        arrows.clear()
-        
-        # Add new arrows
-        max_force_new = np.max(np.linalg.norm(joints_new - forces_new, axis=1))
-        if max_force_new <= 0.0:
-            max_force_new = 1.0
-        for i in range(len(joints_new)):
-            arrow = ax.arrow(joints_new[i, 0], joints_new[i, 1], 
-                            forces_new[i, 0]/max_force_new, forces_new[i, 1]/max_force_new, 
-                            color='orange', width=0.02, head_width=0.1)
-            arrows.append(arrow)
-        
-        # Update axis limits
-        x_data_new = np.concatenate([x_new, joints_new[:, 0]])
-        y_data_new = np.concatenate([y_new, joints_new[:, 1]])
-        finite_xy_new = np.isfinite(x_data_new) & np.isfinite(y_data_new)
-        if np.any(finite_xy_new):
-            x_plot_new = x_data_new[finite_xy_new]
-            y_plot_new = y_data_new[finite_xy_new]
-            x_min_new, x_max_new = np.min(x_plot_new), np.max(x_plot_new)
-            y_min_new, y_max_new = np.min(y_plot_new), np.max(y_plot_new)
-        else:
-            x_min_new, x_max_new = float(np.min(x_new)), float(np.max(x_new))
-            y_min_new, y_max_new = -1.0, 1.0
-        
-        x_mid_new = 0.5 * (x_min_new + x_max_new)
-        y_mid_new = 0.5 * (y_min_new + y_max_new)
-        half_span_new = 0.5 * max(x_max_new - x_min_new, y_max_new - y_min_new)
-        if not np.isfinite(half_span_new) or half_span_new <= 0.0:
-            half_span_new = 1.0
-        
-        ax.set_xlim(x_mid_new - half_span_new, x_mid_new + half_span_new)
-        ax.set_ylim(y_mid_new - half_span_new, y_mid_new + half_span_new)
-        
-        print("Updated interface forces:")
-        for i, (px, py) in enumerate(forces_new, start=1):
-            print(f"  joint {i}: Px={px:.6g}, Py={py:.6g}")
-        
-        fig.canvas.draw()
-    
-    draggable = enable_interactive_points(fig, ax, joint_scatter, interfaces, total_length, B, replot_callback=replot_callback)
-    fig.draggable = draggable  # Keep a reference so it doesn't get garbage collected
-
-    plt.show()
 
 def initial_guess(total_length, interfaces):
-    ref_lengths = reference_lengths(total_length, interfaces)
-    n_segments = len(ref_lengths)
-    
-    xs = [0.0]
-    for L in ref_lengths[:-1]:
-        xs.append(xs[-1] + L)
-    xs = np.asarray(xs, dtype=float)
-    
-    states = []
-    for i in range(n_segments):
-        states.extend([xs[i], 0.0, 0.0, 0.0, 0.0, 0.0])
-    
-    eta = np.zeros(n_segments, dtype=float)
-    n_unknowns = count_unknowns(interfaces)
-    lambdas = np.zeros(n_unknowns, dtype=float)
+    n_segments = len(interfaces) + 1
+    n_rho = n_segments - 1
+    n_lambda = count_unknowns(interfaces)
 
-    return np.concatenate([np.array(states, dtype=float), eta, lambdas])
+    x0 = 0.0
+    y0 = 0.0
+    theta0 = 0.0
+    rho = np.zeros(n_rho, dtype=float)
+    lambdas = np.zeros(n_lambda, dtype=float)
 
-def solve_segments(total_length, B, interfaces):
-    u0 = initial_guess(total_length, interfaces)
-    return least_squares(residuals, u0, args=(total_length, B, interfaces), method='trf', xtol=1e-10, ftol=1e-10, gtol=1e-10)
+    return np.concatenate([[x0, y0, theta0], rho, lambdas])
 
-def continuity_diagnostics(solution, total_length, B, interfaces):
-    n_interfaces = len(interfaces)
-    n_segments = n_interfaces + 1
-    state_block = 6 * n_segments
-    rho_block = n_segments - 1
+def build_unknown_bounds(interfaces):
+    n_segments = len(interfaces) + 1
+    n_rho = n_segments - 1
+    n_lambda = count_unknowns(interfaces)
 
-    states = [np.asarray(solution[i:i+6], dtype=float) for i in range(0, 6*n_segments, 6)]
-    rho = np.asarray(solution[state_block: state_block + rho_block], dtype=float)
-    lambdas = np.asarray(solution[state_block + rho_block:], dtype=float)
+    n_total = 3 + n_rho + n_lambda
+    lb = np.full(n_total, -np.inf, dtype=float)
+    ub = np.full(n_total, np.inf, dtype=float)
 
-    ref_lengths = reference_lengths(total_length, interfaces)
-    lengths = lengths_segments(rho, total_length, ref_lengths)
-    segment_ends = [integrate_segment(states[i], lengths[i], B) for i in range(n_segments)]
-    forces = build_interface_forces(segment_ends, lambdas, interfaces)
+    lam_idx = 3 + n_rho
+    for interface in interfaces:
+        if interface.get("type") == "con":
+            if "normal" in interface:
+                lb[lam_idx] = 0.0
+            lam_idx += 1
 
-    for i in range(n_interfaces):
-        z_post = point_force(segment_ends[i], *forces[i])
-        mismatch = z_post - states[i+1]
-        print(f"joint {i+1}: norm = {np.linalg.norm(mismatch):.6e}, mismatch = {mismatch}")
+    return lb, ub
 
-    r = residuals(solution, total_length, B, interfaces)
+def solve_segments(total_length, B, interfaces, u0=None, theta0=None, end_margin=0.0, max_nfev=1000):
+    u = initial_guess(total_length, interfaces) if u0 is None else np.asarray(u0, dtype=float)
+    if theta0 is not None:
+        u[2] = float(theta0)
+
+    base_resfun = make_residual(total_length, B, interfaces, n_steps=400, end_margin=end_margin)
+    if theta0 is not None:
+        theta0_value = float(theta0)
+
+        def resfun(u_vec):
+            u_eval = u_vec.copy()
+            u_eval[2] = theta0_value
+            return base_resfun(u_eval)
+    else:
+        resfun = base_resfun
+
+    lb, ub = build_unknown_bounds(interfaces)
+    if theta0 is not None:
+        theta0_value = float(theta0)
+        eps = np.sqrt(np.finfo(float).eps)
+        lb[2] = theta0_value - eps
+        ub[2] = theta0_value + eps
+
+    bounds = (lb, ub)
+    res = least_squares(
+        resfun,
+        u,
+        bounds=bounds,
+        jac='2-point',
+        method='trf',
+        x_scale='jac',
+        xtol=1e-8,
+        ftol=1e-10,
+        gtol=1e-10,
+        max_nfev=max_nfev,
+        verbose=1,
+    )
+    u = res.x
+    return res
+
+def continuity_diagnostics(solution, total_length, B, interfaces, theta0=None, end_margin=0.0):
+    solution_eval = np.asarray(solution, dtype=float)
+    if theta0 is not None:
+        solution_eval = solution_eval.copy()
+        solution_eval[2] = float(theta0)
+
+    r = make_residual(total_length, B, interfaces, end_margin=end_margin)(solution_eval)
     print("max abs residual =", np.max(np.abs(r)))
     print("residual norm    =", np.linalg.norm(r))
 
-total_length = 6.0
 
 interfaces = [
-    {"x": 0.5,  "type": "con",  "y": 0.0},
-    {"x": 1.0,  "type": "load", "force": -2},
-    {"x": 3.5,  "type": "load", "force": 2},
-    {"x": 4.0,  "type": "con",  "y": 1.0},
+    {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
+    {"type": "con", "x": 1.575, "y": 0.425, "normal": [1.0, -1.0]},
+    {"type": "con", "x": 2, "y": 2, "normal": [-1.0, 0.0], "theta": np.pi / 2},
 ]
 
-sol = solve_segments(total_length, 1.0, interfaces=interfaces)
+total_length = 6.0
+theta0 = 0.0
+end_margin = 1.0
 
-continuity_diagnostics(sol.x, total_length, 1.0, interfaces)
 
-plot_solution(sol.x, total_length, interfaces, 1.0)
 
+
+sol = solve_segments(total_length, 1.0, interfaces=interfaces, theta0=theta0, end_margin=end_margin)
+
+continuity_diagnostics(sol.x, total_length, 1.0, interfaces, theta0, end_margin)
+
+plot_solution(
+    sol.x,
+    total_length,
+    interfaces,
+    1.0,
+    beam_profile,
+    solve_segments,
+    beam_profile_kwargs={"end_margin": end_margin},
+    solve_segments_kwargs={"theta0": theta0, "end_margin": end_margin},
+)
+
+
+
+
+def solve_inverse_guess(d, total_length, B, interfaces, u0=None, theta0=None, end_margin=0.0, max_nfev=300):
+    interfaces = [dict(interface) for interface in interfaces]
+    interfaces[1]["x"] = d[0]
+    interfaces[1]["y"] = d[1]
+
+    res = solve_segments(total_length, B, interfaces, u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev)
+    return res, interfaces
+
+
+
+
+def make_outer_objective(total_length, B, base_interfaces, theta0=None, end_margin=0.0, max_nfev=80):
+    cache = {"u0": None, "last_good_u": None}
+
+    def objective(d):
+        u0 = cache["last_good_u"] if cache["last_good_u"] is not None else cache["u0"]
+
+        res, interfaces = solve_inverse_guess(
+            d, total_length, B, base_interfaces,
+            u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev,
+        )
+
+        eq_penalty = np.dot(res.fun, res.fun)
+
+        if res.success and eq_penalty < 1e-6:
+            cache["last_good_u"] = res.x.copy()
+
+        if (not res.success) or (eq_penalty > 1e-6):
+            return 1e6 + 1e3 * eq_penalty
+
+        E = bending_energy(res.x, total_length, B, interfaces, end_margin=end_margin)
+        return E + 1e4 * eq_penalty
+
+    return objective
+
+
+bounds = [(0, 2), (0, 2)]
+obj = make_outer_objective(total_length, 1.0, interfaces, theta0=theta0, end_margin=end_margin, max_nfev=200)
+
+
+
+
+x0 = np.array([1.575, 0.425], dtype=float)
+simplex = np.array([
+    x0,
+    x0 + np.array([0.02, 0.00]),
+    x0 + np.array([0.00, 0.02]),
+])
+
+res_outer = minimize(
+    obj,
+    x0=x0,
+    method="Nelder-Mead",
+    bounds=bounds,
+    options={
+        "initial_simplex": simplex,
+        "xatol": 1e-5,
+        "fatol": 1e-5,
+        "maxfev": 200,
+        "disp": True,
+        "return_all": True,
+    },
+)
+
+sol_outer, interfaces_outer = solve_inverse_guess(res_outer.x, total_length, 1.0, interfaces, theta0=theta0, end_margin=end_margin, max_nfev=1000)
+
+
+continuity_diagnostics(sol_outer.x, total_length, 1.0, interfaces_outer, theta0, end_margin)
+print("Optimal (x2, y2) =", res_outer.x)
+print("inner cost =", sol_outer.cost)
+
+plot_solution(
+    sol_outer.x,
+    total_length,
+    interfaces_outer,
+    1.0,
+    beam_profile,
+    solve_segments,
+    beam_profile_kwargs={"end_margin": end_margin},
+    solve_segments_kwargs={"theta0": theta0, "end_margin": end_margin},
+)
 
