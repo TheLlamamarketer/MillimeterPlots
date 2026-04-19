@@ -340,10 +340,10 @@ def build_min_lengths(total_length, n_seg, end_margin=0.0):
 
 
 
-def bending_energy(solution, total_length, B, interfaces, points_per_segment=200, end_margin=0.0):
+def bending_energy(solution, total_length, B, interfaces, points_per_segment=200, end_margin=0.0, n_steps=400):
     x_targ, y_targ, theta_targ, kind, force_mag, normal_vec, has_normal, ref_lengths = encode_interfaces(interfaces, total_length)
     min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
-    starts, ends, forces, lengths = forward_march(solution, total_length, B, x_targ, y_targ, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, n_steps=400)
+    starts, ends, forces, lengths = forward_march(solution, total_length, B, x_targ, y_targ, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, n_steps)
     
     energy = 0.0
     for i in range(len(lengths)):
@@ -386,12 +386,12 @@ def build_unknown_bounds(interfaces):
 
     return lb, ub
 
-def solve_segments(total_length, B, interfaces, u0=None, theta0=None, end_margin=0.0, max_nfev=1000):
+def solve_segments(total_length, B, interfaces, u0=None, theta0=None, end_margin=0.0, max_nfev=1000, n_steps=400):
     u = initial_guess(total_length, interfaces) if u0 is None else np.asarray(u0, dtype=float)
     if theta0 is not None:
         u[2] = float(theta0)
 
-    base_resfun = make_residual(total_length, B, interfaces, n_steps=400, end_margin=end_margin)
+    base_resfun = make_residual(total_length, B, interfaces, n_steps=n_steps, end_margin=end_margin)
     if theta0 is not None:
         theta0_value = float(theta0)
 
@@ -433,53 +433,21 @@ def continuity_diagnostics(solution, total_length, B, interfaces, theta0=None, e
         solution_eval[2] = float(theta0)
 
     r = make_residual(total_length, B, interfaces, end_margin=end_margin)(solution_eval)
-    print("max abs residual =", np.max(np.abs(r)))
-    print("residual norm    =", np.linalg.norm(r))
+    print(f"max abs residual = {np.max(np.abs(r)):.4g}")
+    print(f"residual norm    = {np.linalg.norm(r):.4g}")
 
-
-interfaces = [
-    {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
-    {"type": "con", "x": 1.575, "y": 0.425, "normal": [1.0, -1.0]},
-    {"type": "con", "x": 2, "y": 2, "normal": [-1.0, 0.0], "theta": np.pi / 2},
-]
-
-total_length = 6.0
-theta0 = 0.0
-end_margin = 1.0
-
-
-
-
-sol = solve_segments(total_length, 1.0, interfaces=interfaces, theta0=theta0, end_margin=end_margin)
-
-continuity_diagnostics(sol.x, total_length, 1.0, interfaces, theta0, end_margin)
-
-plot_solution(
-    sol.x,
-    total_length,
-    interfaces,
-    1.0,
-    beam_profile,
-    solve_segments,
-    beam_profile_kwargs={"end_margin": end_margin},
-    solve_segments_kwargs={"theta0": theta0, "end_margin": end_margin},
-)
-
-
-
-
-def solve_inverse_guess(d, total_length, B, interfaces, u0=None, theta0=None, end_margin=0.0, max_nfev=300):
+def solve_inverse_guess(d, total_length, B, interfaces, u0=None, theta0=None, end_margin=0.0, max_nfev=300, n_steps=400):
     interfaces = [dict(interface) for interface in interfaces]
-    interfaces[1]["x"] = d[0]
-    interfaces[1]["y"] = d[1]
+    for i in range(1, len(interfaces)-1):
+        interfaces[i]["x"] = d[2*i - 2]
+        interfaces[i]["y"] = d[2*i - 1]
 
-    res = solve_segments(total_length, B, interfaces, u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev)
+    res = solve_segments(total_length, B, interfaces, u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps)
     return res, interfaces
 
 
 
-
-def make_outer_objective(total_length, B, base_interfaces, theta0=None, end_margin=0.0, max_nfev=80):
+def make_outer_objective(total_length, B, base_interfaces, theta0=None, end_margin=0.0, max_nfev=80, n_steps=400):
     cache = {"u0": None, "last_good_u": None}
 
     def objective(d):
@@ -487,7 +455,7 @@ def make_outer_objective(total_length, B, base_interfaces, theta0=None, end_marg
 
         res, interfaces = solve_inverse_guess(
             d, total_length, B, base_interfaces,
-            u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev,
+            u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps,
         )
 
         eq_penalty = np.dot(res.fun, res.fun)
@@ -498,55 +466,83 @@ def make_outer_objective(total_length, B, base_interfaces, theta0=None, end_marg
         if (not res.success) or (eq_penalty > 1e-6):
             return 1e6 + 1e3 * eq_penalty
 
-        E = bending_energy(res.x, total_length, B, interfaces, end_margin=end_margin)
+        E = bending_energy(res.x, total_length, B, interfaces, end_margin=end_margin, n_steps=n_steps)
         return E + 1e4 * eq_penalty
 
     return objective
 
+def main():
+    interfaces = [
+        {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
+        {"type": "con", "x": 1.495, "y": 0.345},
+        {"type": "con", "x": 2.505, "y": 1.655},
+        {"type": "con", "x": 4, "y": 2, "normal": [0.0, -1.0]},
+    ]
 
-bounds = [(0, 2), (0, 2)]
-obj = make_outer_objective(total_length, 1.0, interfaces, theta0=theta0, end_margin=end_margin, max_nfev=200)
+    total_length = 7.0
+    end_margin = 0.5
+    theta0 = None
+
+    sol = solve_segments(total_length, 1.0, interfaces=interfaces, theta0=theta0, end_margin=end_margin)
+
+    continuity_diagnostics(sol.x, total_length, 1.0, interfaces, theta0, end_margin)
+
+    plot_solution(
+        sol.x,
+        total_length,
+        interfaces,
+        1.0,
+        beam_profile,
+        solve_segments,
+        beam_profile_kwargs={"end_margin": end_margin},
+        solve_segments_kwargs={"theta0": theta0, "end_margin": end_margin},
+    )
+
+    theta0 = 0.0
+    interfaces[-1]["theta"] = 0.0
+
+    obj = make_outer_objective(total_length, 1.0, interfaces, theta0=theta0, end_margin=end_margin, max_nfev=200, n_steps=80)
+
+    x0 = np.concatenate([np.array([interface["x"], interface["y"]]) for interface in interfaces[1:-1]])
+    r = 0.2
+    bounds = [(interface[axis] - r, interface[axis] + r) for interface in interfaces[1:-1] for axis in ["x", "y"]]
+    simplex = np.vstack([x0, x0 + 0.02 * np.eye(len(x0))])
+    print(bounds)
+
+    res_outer = minimize(
+        obj,
+        x0=x0,
+        method="Nelder-Mead",
+        bounds=bounds,
+        options={
+            "initial_simplex": simplex,
+            "xatol": 1e-5,
+            "fatol": 1e-5,
+            "maxfev": 200,
+            "disp": True,
+            "return_all": True,
+        },
+    )
+    
+    interfaces[-1].pop("theta", None)
+    sol_outer, interfaces_outer = solve_inverse_guess(res_outer.x, total_length, 1.0, interfaces, end_margin=end_margin, max_nfev=1000, n_steps=400)
+
+    continuity_diagnostics(sol_outer.x, total_length, 1.0, interfaces_outer, end_margin=end_margin)
+    print(f"Optimal (x2, y2) = {res_outer.x[0]:.6g}, {res_outer.x[1]:.6g}")
+    print(f"inner cost = {sol_outer.cost:.4g}")
+
+    plot_solution(
+        sol_outer.x,
+        total_length,
+        interfaces_outer,
+        1.0,
+        beam_profile,
+        solve_segments,
+        beam_profile_kwargs={"end_margin": end_margin},
+        solve_segments_kwargs={"end_margin": end_margin, "max_nfev": 1000, "n_steps": 400},
+    )
 
 
-
-
-x0 = np.array([1.575, 0.425], dtype=float)
-simplex = np.array([
-    x0,
-    x0 + np.array([0.02, 0.00]),
-    x0 + np.array([0.00, 0.02]),
-])
-
-res_outer = minimize(
-    obj,
-    x0=x0,
-    method="Nelder-Mead",
-    bounds=bounds,
-    options={
-        "initial_simplex": simplex,
-        "xatol": 1e-5,
-        "fatol": 1e-5,
-        "maxfev": 200,
-        "disp": True,
-        "return_all": True,
-    },
-)
-
-sol_outer, interfaces_outer = solve_inverse_guess(res_outer.x, total_length, 1.0, interfaces, theta0=theta0, end_margin=end_margin, max_nfev=1000)
-
-
-continuity_diagnostics(sol_outer.x, total_length, 1.0, interfaces_outer, theta0, end_margin)
-print("Optimal (x2, y2) =", res_outer.x)
-print("inner cost =", sol_outer.cost)
-
-plot_solution(
-    sol_outer.x,
-    total_length,
-    interfaces_outer,
-    1.0,
-    beam_profile,
-    solve_segments,
-    beam_profile_kwargs={"end_margin": end_margin},
-    solve_segments_kwargs={"theta0": theta0, "end_margin": end_margin},
-)
+if __name__ == "__main__":
+    main()
 
