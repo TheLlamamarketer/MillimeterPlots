@@ -25,7 +25,6 @@ def plot_solution(
         **beam_profile_kwargs,
     )
 
-    print("Interface forces and positions:")
     print(f"theta[0] = {theta[0]*180/np.pi:.4g}°, theta[-1] = {theta[-1]*180/np.pi:.4g}°")
     for i, (px, py) in enumerate(forces, start=1):
         mode = "con" if interfaces[i - 1].get("type") == "con" else "load"
@@ -48,7 +47,7 @@ def plot_solution(
     
     # Initial arrow collection
     arrows = []
-    max_force = np.max(np.linalg.norm(joints - forces, axis=1))
+    max_force = np.max(np.linalg.norm(forces, axis=1))
     if max_force <= 0.0:
         max_force = 1.0
     for i in range(len(joints)):

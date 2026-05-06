@@ -90,6 +90,35 @@ def encode_interfaces(interfaces, total_length):
 
     return x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, ref_lengths
 
+def build_reference_lengths_from_targets(total_length, x_targets, y_targets, min_lengths):
+    n_seg = len(min_lengths)
+    available = float(total_length) - float(np.sum(min_lengths))
+    if available <= 0.0:
+        raise ValueError("total_length must exceed the sum of minimum segment lengths.")
+
+    floor = max(1e-9 * float(total_length), 1e-9)
+    ref_lengths = np.full(n_seg, available / n_seg, dtype=float)
+
+    have_xy = np.all(np.isfinite(x_targets)) and np.all(np.isfinite(y_targets))
+    if not have_xy or x_targets.size < 2:
+        return ref_lengths
+
+    points = np.column_stack((x_targets, y_targets))
+    contact_chords = np.linalg.norm(np.diff(points, axis=0), axis=1)
+
+    desired_lengths = np.array(min_lengths, dtype=float)
+    desired_lengths[1:-1] += np.maximum(contact_chords, floor)
+
+    spare = float(total_length) - float(np.sum(desired_lengths))
+    if spare >= 0.0:
+        desired_lengths[0] += 0.5 * spare
+        desired_lengths[-1] += 0.5 * spare
+    else:
+        desired_lengths[0] += floor
+        desired_lengths[-1] += floor
+
+    return np.maximum(desired_lengths - min_lengths, floor)
+
 def integrate_segment(z0, length, B):
     # Integrates the ODE and uses the initial conditions z0 to compute the state at the end of the segment. z(l) = z0 + integral of dz/ds from 0 to l.
     sol = solve_ivp(lambda s, z: ode_rhs(z, B), [0, length], z0, method='DOP853', rtol=1e-8, atol=1e-10)
@@ -211,7 +240,7 @@ def reference_lengths(total_length, interfaces):
 
 
 def make_residual(total_length, B, interfaces, n_steps=120, end_margin=0.0):
-    x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, ref_lengths = encode_interfaces(interfaces, total_length)
+    x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, _ = encode_interfaces(interfaces, total_length)
     has_x = np.isfinite(x_targets)
     has_y = np.isfinite(y_targets)
     has_theta = np.isfinite(theta_targets)
@@ -222,6 +251,7 @@ def make_residual(total_length, B, interfaces, n_steps=120, end_margin=0.0):
 
     n_seg = len(interfaces) + 1
     min_lengths = build_min_lengths(total_length, n_seg, end_margin)
+    ref_lengths = build_reference_lengths_from_targets(total_length, x_targets, y_targets, min_lengths)
 
     n_interface_eq = 0
     for i in range(len(interfaces)):
@@ -306,8 +336,9 @@ def sample_segment(z0, length, B, points=200):
     return out
 
 def beam_profile(solution, total_length, interfaces, B, points_per_segment=200, end_margin=0.0):
-    x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, ref_lengths = encode_interfaces(interfaces, total_length)
+    x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, _ = encode_interfaces(interfaces, total_length)
     min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
+    ref_lengths = build_reference_lengths_from_targets(total_length, x_targets, y_targets, min_lengths)
 
     starts, ends, forces, lengths = forward_march(solution, total_length, B,
             x_targets, y_targets, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, 400)
@@ -342,8 +373,9 @@ def build_min_lengths(total_length, n_seg, end_margin=0.0):
 
 
 def bending_energy(solution, total_length, B, interfaces, points_per_segment=200, end_margin=0.0, n_steps=400):
-    x_targ, y_targ, theta_targ, kind, force_mag, normal_vec, has_normal, ref_lengths = encode_interfaces(interfaces, total_length)
+    x_targ, y_targ, theta_targ, kind, force_mag, normal_vec, has_normal, _ = encode_interfaces(interfaces, total_length)
     min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
+    ref_lengths = build_reference_lengths_from_targets(total_length, x_targ, y_targ, min_lengths)
     starts, ends, forces, lengths = forward_march(solution, total_length, B, x_targ, y_targ, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, n_steps)
     
     energy = 0.0
@@ -356,7 +388,7 @@ def bending_energy(solution, total_length, B, interfaces, points_per_segment=200
 
 
 
-def initial_guess(interfaces):
+def initial_guess(interfaces, total_length=None, end_margin=0.0):
     n_segments = len(interfaces) + 1
     n_rho = n_segments - 1
     n_lambda = count_unknowns(interfaces)
@@ -366,6 +398,20 @@ def initial_guess(interfaces):
     theta0 = 0.0
     rho = np.zeros(n_rho, dtype=float)
     lambdas = np.zeros(n_lambda, dtype=float)
+
+    if total_length is not None and len(interfaces) > 0:
+        x_targets, y_targets, theta_targets, kind, force_mag, normal_vec, has_normal, _ = encode_interfaces(interfaces, total_length)
+        min_lengths = build_min_lengths(total_length, n_segments, end_margin)
+        ref_lengths = build_reference_lengths_from_targets(total_length, x_targets, y_targets, min_lengths)
+        lengths = lengths_segments(rho, total_length, ref_lengths, min_lengths)
+
+        if np.isfinite(x_targets[0]) and np.isfinite(y_targets[0]):
+            if np.isfinite(theta_targets[0]):
+                theta0 = theta_targets[0]
+            else:
+                theta0 = 0.0
+            x0 = x_targets[0] - lengths[0] * np.cos(theta0)
+            y0 = y_targets[0] - lengths[0] * np.sin(theta0)
 
     return np.concatenate([[x0, y0, theta0], rho, lambdas])
 
@@ -388,7 +434,7 @@ def build_unknown_bounds(interfaces):
     return lb, ub
 
 def solve_segments(total_length, B, interfaces, u0=None, theta0=None, end_margin=0.0, max_nfev=1000, n_steps=400):
-    u = initial_guess(interfaces) if u0 is None else np.asarray(u0, dtype=float)
+    u = initial_guess(interfaces, total_length=total_length, end_margin=end_margin) if u0 is None else np.asarray(u0, dtype=float)
     if theta0 is not None:
         u[2] = float(theta0)
 
@@ -411,6 +457,11 @@ def solve_segments(total_length, B, interfaces, u0=None, theta0=None, end_margin
         ub[2] = theta0_value + eps
 
     bounds = (lb, ub)
+    finite_lb = np.isfinite(lb)
+    finite_ub = np.isfinite(ub)
+    u[finite_lb] = np.maximum(u[finite_lb], lb[finite_lb])
+    u[finite_ub] = np.minimum(u[finite_ub], ub[finite_ub])
+
     res = least_squares(
         resfun,
         u,
@@ -427,15 +478,35 @@ def solve_segments(total_length, B, interfaces, u0=None, theta0=None, end_margin
     u = res.x
     return res
 
-def continuity_diagnostics(solution, total_length, B, interfaces, theta0=None, end_margin=0.0):
+def continuity_diagnostics(solution, total_length, B, interfaces, theta0=None, end_margin=0.0, n_steps=400):
     solution_eval = np.asarray(solution, dtype=float)
     if theta0 is not None:
         solution_eval = solution_eval.copy()
         solution_eval[2] = float(theta0)
 
-    r = make_residual(total_length, B, interfaces, end_margin=end_margin)(solution_eval)
+    r = make_residual(total_length, B, interfaces, end_margin=end_margin, n_steps=n_steps)(solution_eval)
     print(f"max abs residual = {np.max(np.abs(r)):.4g}")
     print(f"residual norm    = {np.linalg.norm(r):.4g}")
+
+    x_targ, y_targ, theta_targ, kind, force_mag, normal_vec, has_normal, _ = encode_interfaces(interfaces, total_length)
+    min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
+    ref_lengths = build_reference_lengths_from_targets(total_length, x_targ, y_targ, min_lengths)
+    starts, ends, forces, lengths = forward_march(
+        solution_eval,
+        total_length,
+        B,
+        x_targ,
+        y_targ,
+        kind,
+        force_mag,
+        normal_vec,
+        has_normal,
+        ref_lengths,
+        min_lengths,
+        n_steps,
+    )
+    print(f"tail theta deg   = {starts[0, 2] * 180 / np.pi:.4g}, {starts[-1, 2] * 180 / np.pi:.4g}")
+    print(f"segment lengths  = {np.array2string(lengths, precision=4)}")
 
 
 
@@ -448,47 +519,120 @@ def solve_inverse_guess(d, total_length, B, interfaces, u0=None, theta0=None, en
     res = solve_segments(total_length, B, interfaces, u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps)
     return res, interfaces
 
-def make_outer_objective(total_length, B, base_interfaces, cache=True, theta0=None, end_margin=0.0, max_nfev=80, n_steps=400):
+def solve_multistart(d, total_length, B, interfaces, seeds, theta0=None, end_margin=0.0, max_nfev=300, n_steps=400):
+    seeds = list(seeds)
+    trial_interfaces = [dict(interface) for interface in interfaces]
+    for i in range(1, len(trial_interfaces)-1):
+        trial_interfaces[i]["x"] = d[2*i - 2]
+        trial_interfaces[i]["y"] = d[2*i - 1]
+
+    n_rho = len(trial_interfaces)
+    n_lambda = count_unknowns(trial_interfaces)
+    lam_start = 3 + n_rho
+    if n_lambda > 0:
+        base_seed = initial_guess(trial_interfaces, total_length=total_length, end_margin=end_margin)
+        patterns = [
+            np.ones(n_lambda, dtype=float),
+            -np.ones(n_lambda, dtype=float),
+            np.where(np.arange(n_lambda) % 2 == 0, 1.0, -1.0),
+            np.where(np.arange(n_lambda) % 2 == 0, -1.0, 1.0),
+        ]
+        for pattern in patterns:
+            seed = base_seed.copy()
+            seed[lam_start:lam_start + n_lambda] = 0.1 * pattern
+            seeds.append(seed)
+
+    best = None
+    best_interfaces = None
+    for u0 in seeds:
+        res, trial_interfaces = solve_inverse_guess(d, total_length, B, interfaces, u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps)
+        if best is None or np.dot(res.fun, res.fun) < np.dot(best.fun, best.fun):
+            best = res
+            best_interfaces = trial_interfaces
+    return best, best_interfaces
+
+
+
+def solution_metrics(solution, total_length, B, interfaces, theta0=None, end_margin=0.0, n_steps=400):
+    solution_eval = np.asarray(solution, dtype=float)
+    if theta0 is not None:
+        solution_eval = solution_eval.copy()
+        solution_eval[2] = float(theta0)
+
+    xt, yt, thetat, kind, force_mag, normal_vec, has_normal, _ = encode_interfaces(interfaces, total_length)
+    min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
+    ref_lengths = build_reference_lengths_from_targets(total_length, xt, yt, min_lengths)
+    starts, ends, forces, lengths = forward_march(solution_eval, total_length, B, xt, yt, kind, force_mag, normal_vec, has_normal, ref_lengths, min_lengths, n_steps)
+
+    return starts, ends, forces, lengths
+
+
+def make_outer_objective(total_length, B, base_interfaces, cache=True, theta0=None, end_margin=0.0, max_nfev=80, n_steps=400, tail_weight=1e3):
     cached = {"solution": None}
     def objective(d):
         u0 = cached["solution"] if cache and cached["solution"] is not None else None
-        res, interfaces = solve_inverse_guess(
+        
+        seeds = [None]
+        if u0 is not None:
+            seeds.append(u0)
+        
+        res, interfaces = solve_multistart(
             d, total_length, B, base_interfaces,
-            u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps,
+            seeds, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps,
         )
         eq_penalty = np.dot(res.fun, res.fun)
         
         force_first = res.x[3 + len(interfaces)]
+        if not np.isfinite(eq_penalty) or not np.isfinite(force_first):
+            return 1e30
         
-        w_eq = 1e2
-        w_bottom = 1e4
+        w_eq = 1e6
+        w_min = 1e4
         
-        if cache and res.success and eq_penalty < 1e-6:
+        starts, ends, forces, lengths = solution_metrics(res.x, total_length, B, interfaces, theta0=theta0, end_margin=end_margin, n_steps=n_steps)
+        
+        horizontal_penalty = np.sin(starts[0, 2])**2 + np.sin(starts[-1, 2])**2 + np.sin(ends[0, 2])**2 + np.sin(ends[-1, 2])**2
+        
+        if cache and res.success and eq_penalty < 1e-4:
             cached["solution"] = res.x.copy()
-        if not (res.success) or (eq_penalty > 1e-6):
-            return 1e4 + eq_penalty*w_eq
         
         E = bending_energy(res.x, total_length, B, interfaces, end_margin=end_margin, n_steps=n_steps)
         
-        J = w_eq * eq_penalty + w_bottom * force_first**2 + E
+        J = w_eq * eq_penalty + w_min * force_first**2 + E + horizontal_penalty * tail_weight
+        if not res.success:
+            J += 1e3
         return J
         
     return objective
+
+def design_points_from_vector(d, interfaces):
+    points = [(interfaces[0]["x"], interfaces[0]["y"])]
+    for i in range(1, len(interfaces) - 1):
+        points.append((d[2*i - 2], d[2*i - 1]))
+    points.append((interfaces[-1]["x"], interfaces[-1]["y"]))
+    return np.asarray(points, dtype=float)
+
+def contact_chord_slack(d, interfaces, total_length, end_margin=0.0):
+    points = design_points_from_vector(d, interfaces)
+    chord_sum = np.sum(np.linalg.norm(np.diff(points, axis=0), axis=1))
+    min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
+    available_contact_length = float(total_length) - min_lengths[0] - min_lengths[-1]
+    return available_contact_length - chord_sum
 
 def main():
     
     interfaces = [
         {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
-        {"type": "con", "x": 2.994, "y": 0.669},
-        {"type": "con", "x": 4.859, "y": 2.818},
-        {"type": "con", "x": 5.162, "y": 3.302},
+        {"type": "con", "x": 3.093, "y": 0.4022},
+        {"type": "con", "x": 5.24, "y": 2.721},
+        {"type": "con", "x": 5.38, "y": 3.199},
         {"type": "con", "x": 8, "y": 4.1725, "normal": [0.0, -1.0]},
     ]
 
-    total_length = 20.0
+    total_length = 15.0
     end_margin = 0.5
     theta0 = None
-    B = 1.0
+    B = 8.5e-3
 
     sol = solve_segments(total_length, B, interfaces=interfaces, theta0=theta0, end_margin=end_margin, max_nfev=2000, n_steps=400)
 
@@ -508,12 +652,12 @@ def main():
     theta0 = 0.0
     interfaces[-1]["theta"] = 0.0
 
-    obj = make_outer_objective(total_length, B, interfaces, cache=False, theta0=theta0, end_margin=end_margin, max_nfev=100, n_steps=100)
+    obj = make_outer_objective(total_length, B, interfaces, cache=True, theta0=theta0, end_margin=end_margin, max_nfev=100, n_steps=100)
 
     x0 = np.concatenate([np.array([interface["x"], interface["y"]]) for interface in interfaces[1:-1]])
     r = 2.0
     constraint = 0.1
-    bounds = [(interface[axis] - r, interface[axis] + r if interface[axis] + r <= interfaces[-1][axis] - constraint else interfaces[-1][axis] - constraint) for interface in interfaces[1:-1] for axis in ["x", "y"]]
+    bounds = [(interface[axis] - r if interface[axis] - r >= interfaces[0][axis] + constraint else interfaces[0][axis] + constraint, interface[axis] + r if interface[axis] + r <= interfaces[-1][axis] - constraint else interfaces[-1][axis] - constraint) for interface in interfaces[1:-1] for axis in ["x", "y"]]
     print(bounds)
 
 
@@ -526,6 +670,18 @@ def main():
         for i, (lb_i, ub_i) in enumerate(bounds):
             cobyla_constraints.append({"type": "ineq", "fun": lambda d, i=i, lb_i=lb_i: d[i] - lb_i})
             cobyla_constraints.append({"type": "ineq", "fun": lambda d, i=i, ub_i=ub_i: ub_i - d[i]})
+        
+        n_movable = len(interfaces) - 2
+        min_dx = constraint
+        if n_movable > 0:
+            cobyla_constraints.append({"type": "ineq", "fun": lambda d, min_dx=min_dx: d[0] - interfaces[0]["x"] - min_dx})
+            for j in range(n_movable - 1):
+                cobyla_constraints.append({"type": "ineq", "fun": lambda d, j=j, min_dx=min_dx: d[2*(j + 1)] - d[2*j] - min_dx})
+            cobyla_constraints.append({"type": "ineq", "fun": lambda d, min_dx=min_dx: interfaces[-1]["x"] - d[-2] - min_dx})
+
+        cobyla_constraints.append({"type": "ineq", "fun": lambda d: contact_chord_slack(d, interfaces, total_length, end_margin)})
+        
+
 
         minimize_kwargs["constraints"] = cobyla_constraints
         options = {

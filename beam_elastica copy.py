@@ -448,49 +448,49 @@ def solve_inverse_guess(d, total_length, B, interfaces, u0=None, theta0=None, en
     res = solve_segments(total_length, B, interfaces, u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps)
     return res, interfaces
 
-def make_outer_objective(total_length, B, base_interfaces, cache=True, theta0=None, end_margin=0.0, max_nfev=80, n_steps=400):
-    cached = {"solution": None}
+def make_outer_objective(total_length, B, base_interfaces, theta0=None, end_margin=0.0, max_nfev=80, n_steps=400):
+    cache = {"u0": None, "last_good_u": None}
+
     def objective(d):
-        u0 = cached["solution"] if cache and cached["solution"] is not None else None
+        u0 = cache["last_good_u"] if cache["last_good_u"] is not None else cache["u0"]
+
         res, interfaces = solve_inverse_guess(
             d, total_length, B, base_interfaces,
             u0=u0, theta0=theta0, end_margin=end_margin, max_nfev=max_nfev, n_steps=n_steps,
         )
+
         eq_penalty = np.dot(res.fun, res.fun)
+
+        if res.success and eq_penalty < 1e-6:
+            cache["last_good_u"] = res.x.copy()
+
+        if (not res.success) or (eq_penalty > 1e-6):
+            return 1e6 + 1e3 * eq_penalty
         
-        force_first = res.x[3 + len(interfaces)]
-        
-        w_eq = 1e2
-        w_bottom = 1e4
-        
-        if cache and res.success and eq_penalty < 1e-6:
-            cached["solution"] = res.x.copy()
-        if not (res.success) or (eq_penalty > 1e-6):
-            return 1e4 + eq_penalty*w_eq
-        
+        force_upper = res.x[-1]
+
         E = bending_energy(res.x, total_length, B, interfaces, end_margin=end_margin, n_steps=n_steps)
-        
-        J = w_eq * eq_penalty + w_bottom * force_first**2 + E
-        return J
-        
+        return E + 1e3 * eq_penalty + 1e7*force_upper**2
+
     return objective
 
 def main():
     
+    
     interfaces = [
         {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
-        {"type": "con", "x": 2.994, "y": 0.669},
-        {"type": "con", "x": 4.859, "y": 2.818},
-        {"type": "con", "x": 5.162, "y": 3.302},
-        {"type": "con", "x": 8, "y": 4.1725, "normal": [0.0, -1.0]},
+        {"type": "con", "x": 1.451, "y": 0.3655},
+        {"type": "con", "x": 2.122, "y": 1.368}, 
+        {"type": "con", "x": 2.783, "y": 1.85},
+        {"type": "con", "x": 4, "y": 2, "normal": [0.0, -1.0]},
     ]
 
-    total_length = 20.0
+    total_length = 7.0
     end_margin = 0.5
     theta0 = None
     B = 1.0
 
-    sol = solve_segments(total_length, B, interfaces=interfaces, theta0=theta0, end_margin=end_margin, max_nfev=2000, n_steps=400)
+    sol = solve_segments(total_length, B, interfaces=interfaces, theta0=theta0, end_margin=end_margin)
 
     continuity_diagnostics(sol.x, total_length, B, interfaces, theta0, end_margin)
 
@@ -508,54 +508,32 @@ def main():
     theta0 = 0.0
     interfaces[-1]["theta"] = 0.0
 
-    obj = make_outer_objective(total_length, B, interfaces, cache=False, theta0=theta0, end_margin=end_margin, max_nfev=100, n_steps=100)
+    obj = make_outer_objective(total_length, B, interfaces, theta0=theta0, end_margin=end_margin, max_nfev=500, n_steps=80)
 
     x0 = np.concatenate([np.array([interface["x"], interface["y"]]) for interface in interfaces[1:-1]])
-    r = 2.0
+    r = 1.0
     constraint = 0.1
     bounds = [(interface[axis] - r, interface[axis] + r if interface[axis] + r <= interfaces[-1][axis] - constraint else interfaces[-1][axis] - constraint) for interface in interfaces[1:-1] for axis in ["x", "y"]]
+    simplex = np.vstack([x0, x0 + 0.02 * np.eye(len(x0))])
     print(bounds)
 
 
-    outer_method = "COBYLA"  #  "COBYLA" or "Nelder-Mead"
     maxfev = 500
-
-    minimize_kwargs = {}
-    if outer_method == "COBYLA":
-        cobyla_constraints = []
-        for i, (lb_i, ub_i) in enumerate(bounds):
-            cobyla_constraints.append({"type": "ineq", "fun": lambda d, i=i, lb_i=lb_i: d[i] - lb_i})
-            cobyla_constraints.append({"type": "ineq", "fun": lambda d, i=i, ub_i=ub_i: ub_i - d[i]})
-
-        minimize_kwargs["constraints"] = cobyla_constraints
-        options = {
-            "tol": 1e-5,
-            "maxiter": maxfev,
-            "disp": False,
-        }
-    elif outer_method == "Nelder-Mead":
-        simplex = np.vstack([x0, x0 + 0.02 * np.eye(len(x0))])
-        minimize_kwargs["bounds"] = bounds
-        options = {
-            "initial_simplex": simplex,
-            "xatol": 1e-5,
-            "fatol": 1e-5,
-            "maxfev": maxfev,
-            "disp": False,
-            "return_all": True,
-        }
-    else:
-        raise ValueError(f"Unsupported outer_method: {outer_method}")
-
-    with ProgressBar(total=maxfev, desc=f"Outer {outer_method}", unit="fev", leave=False) as pbar:
+    with ProgressBar(total=maxfev, desc="Outer NM", unit="fev", leave=False) as pbar:
         res_outer = minimize(
             lambda d: (pbar.update(), obj(d))[1],
             x0=x0,
-            method=outer_method,
-            options=options,
-            **minimize_kwargs,
+            method="Nelder-Mead",
+            bounds=bounds,
+            options={
+                "initial_simplex": simplex,
+                "xatol": 1e-5,
+                "fatol": 1e-5,
+                "maxfev": maxfev,
+                "disp": False,
+                "return_all": True,
+            },
         )
-        
     interfaces_check = [dict(interface) for interface in interfaces]
     sol_check, interfaces_check = solve_inverse_guess(
         res_outer.x,
