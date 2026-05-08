@@ -3,9 +3,31 @@ from scipy.integrate import solve_ivp
 from scipy.optimize import least_squares, minimize, NonlinearConstraint
 from numba import njit
 
-from beam_elastica_plot import plot_solution
+from beam_elastica_plot import plot_solution, save_mirrored_pdf
 from numba_progress import ProgressBar
 
+
+
+def fmt_float(value, width=11, fixed=6, sci=3, small=1e-4, large=1e5):
+    value = float(value)
+    if not np.isfinite(value):
+        return f"{value:>{width}}"
+    if value != 0.0 and (abs(value) < small or abs(value) >= large):
+        return f"{value:{width}.{sci}e}"
+    return f"{value:{width}.{fixed}f}"
+
+
+def fmt_array(values, fixed=6):
+    values = np.asarray(values, dtype=float)
+
+    def formatter(value):
+        return fmt_float(value, width=0, fixed=fixed)
+
+    return np.array2string(values, formatter={"float_kind": formatter})
+
+
+def deg(value):
+    return float(value) * 180.0 / np.pi
 
 
 @njit(cache=True)
@@ -581,21 +603,21 @@ def continuity_diagnostics(solution, total_length, B, interfaces, theta0=None, e
         end_margin=end_margin,
         n_steps=n_steps,
     )
-    print(f"max abs residual = {diag['max_abs_residual']:.4g}")
-    print(f"residual norm    = {diag['residual_norm']:.4g}")
+    print(f"\nmax abs residual = {fmt_float(diag['max_abs_residual'])}")
+    print(f"residual norm    = {fmt_float(diag['residual_norm'])}")
     print(
         "tail angles deg  = "
-        f"left {diag['left_angle'] * 180 / np.pi:.4g}, "
-        f"right contact {diag['right_contact_angle'] * 180 / np.pi:.4g}, "
-        f"right end {diag['right_end_angle'] * 180 / np.pi:.4g}"
+        f"left {fmt_float(deg(diag['left_angle']))}, "
+        f"right contact {fmt_float(deg(diag['right_contact_angle']))}, "
+        f"right end {fmt_float(deg(diag['right_end_angle']))}"
     )
     print(
         "tail delta deg   = "
-        f"left {diag['left_tail_delta'] * 180 / np.pi:.4g}, "
-        f"right {diag['right_tail_delta'] * 180 / np.pi:.4g}"
+        f"left {fmt_float(deg(diag['left_tail_delta']))}, "
+        f"right {fmt_float(deg(diag['right_tail_delta']))}"
     )
-    print(f"tail state max   = {diag['tail_state_max']:.4g}")
-    print(f"segment lengths  = {np.array2string(diag['lengths'], precision=4)}")
+    print(f"tail state max   = {fmt_float(diag['tail_state_max'])}")
+    print(f"segment lengths  = {fmt_array(diag['lengths'], fixed=5)}")
 
 
 
@@ -673,66 +695,131 @@ def solve_multistart(d, total_length, B, interfaces, seeds, theta0=None, end_mar
     return best, best_interfaces
 
 
-def design_points_from_vector(d, interfaces):
+def design_points_from_vector(d, interfaces, move_final_x=False):
     points = [(interfaces[0]["x"], interfaces[0]["y"])]
     for i in range(1, len(interfaces) - 1):
         points.append((d[2*i - 2], d[2*i - 1]))
-    points.append((interfaces[-1]["x"], interfaces[-1]["y"]))
+
+    final_x = d[2 * (len(interfaces) - 2)] if move_final_x and len(interfaces) > 1 else interfaces[-1]["x"]
+    points.append((final_x, interfaces[-1]["y"]))
     return np.asarray(points, dtype=float)
 
 
-def contact_chord_slack(d, interfaces, total_length, end_margin=0.0):
-    points = design_points_from_vector(d, interfaces)
+def contact_chord_slack(d, interfaces, total_length, end_margin=0.0, move_final_x=False):
+    points = design_points_from_vector(d, interfaces, move_final_x=move_final_x)
     chord_sum = np.sum(np.linalg.norm(np.diff(points, axis=0), axis=1))
     min_lengths = build_min_lengths(total_length, len(interfaces) + 1, end_margin)
     available_contact_length = float(total_length) - min_lengths[0] - min_lengths[-1]
     return available_contact_length - chord_sum
 
 
-def design_vector_from_interfaces(interfaces):
-    if len(interfaces) <= 2:
-        return np.empty(0, dtype=float)
-    return np.concatenate([
+def design_vector_from_interfaces(interfaces, move_final_x=False):
+    pieces = [
         np.array([interface["x"], interface["y"]], dtype=float)
         for interface in interfaces[1:-1]
-    ])
+    ]
+    if move_final_x and len(interfaces) > 1:
+        pieces.append(np.array([interfaces[-1]["x"]], dtype=float))
+
+    if not pieces:
+        return np.empty(0, dtype=float)
+    return np.concatenate(pieces)
 
 
-def apply_design_vector(d, interfaces):
+def apply_design_vector(d, interfaces, move_final_x=False):
     moved = [dict(interface) for interface in interfaces]
     for i in range(1, len(moved) - 1):
         moved[i]["x"] = float(d[2*i - 2])
         moved[i]["y"] = float(d[2*i - 1])
+    if move_final_x and len(moved) > 1:
+        moved[-1]["x"] = float(d[2 * (len(moved) - 2)])
     return moved
 
 
-def build_design_bounds(interfaces, radius=2.0, margin=0.1):
+def build_design_bounds(interfaces, radius=2.0, margin=0.1, move_final_x=False, min_internal_y=None):
     bounds = []
+    final_x_upper = float(interfaces[-1]["x"]) + radius if move_final_x else float(interfaces[-1]["x"])
     for interface in interfaces[1:-1]:
         for axis in ("x", "y"):
             lower = float(interface[axis]) - radius
             upper = float(interface[axis]) + radius
-            end_upper = float(interfaces[-1][axis]) - margin
+            if axis == "y" and min_internal_y is not None:
+                lower = max(lower, float(min_internal_y))
+            if axis == "x":
+                end_upper = final_x_upper - margin
+            else:
+                end_upper = float(interfaces[-1][axis]) - margin
             if upper > end_upper:
                 upper = end_upper
             bounds.append((lower, upper))
+    if move_final_x and len(interfaces) > 1:
+        bounds.append((float(interfaces[-1]["x"]) - radius, float(interfaces[-1]["x"]) + radius))
     return bounds
 
 
-def design_guard_residuals(d, interfaces, total_length, end_margin=0.0, min_dx=0.1):
-    if len(interfaces) <= 2:
+def design_guard_residuals(d, interfaces, total_length, end_margin=0.0, min_dx=0.1, move_final_x=False):
+    if len(interfaces) <= 1:
         return np.empty(0, dtype=float)
 
     guards = []
-    xs = [float(interfaces[0]["x"])]
-    xs.extend(float(d[2*i]) for i in range(len(interfaces) - 2))
-    xs.append(float(interfaces[-1]["x"]))
+    points = design_points_from_vector(d, interfaces, move_final_x=move_final_x)
+    xs = points[:, 0]
 
     for left, right in zip(xs[:-1], xs[1:]):
         guards.append(min(0.0, right - left - min_dx))
-    guards.append(min(0.0, contact_chord_slack(d, interfaces, total_length, end_margin)))
+    guards.append(min(0.0, contact_chord_slack(d, interfaces, total_length, end_margin, move_final_x=move_final_x)))
 
     return np.asarray(guards, dtype=float)
+
+
+def floor_contact_force_residuals(forces, interfaces, floor_y=0.0, floor_band=0.05, internal_only=True):
+    residuals = []
+    for i, interface in enumerate(interfaces):
+        if internal_only and (i == 0 or i == len(interfaces) - 1):
+            continue
+
+        y = float(interface.get("y", np.nan))
+        if not np.isfinite(y):
+            residuals.append(0.0)
+            continue
+
+        if floor_band > 0.0:
+            gate = max(0.0, 1.0 - abs(y - floor_y) / floor_band)
+        else:
+            gate = 1.0 if y == floor_y else 0.0
+
+        residuals.append(gate * np.linalg.norm(forces[i]))
+
+    return np.asarray(residuals, dtype=float)
+
+
+def max_abs_moment_from_metrics(starts, lengths, B, points_per_segment=80):
+    max_moment = 0.0
+    for i, length in enumerate(lengths):
+        seg = sample_segment(starts[i], length, B, points=points_per_segment)
+        max_moment = max(max_moment, float(np.max(np.abs(seg[3]))))
+    return max_moment
+
+
+def max_abs_moment(solution, total_length, B, interfaces, theta0=None, end_margin=0.0, n_steps=400, points_per_segment=80):
+    starts, ends, forces, lengths = solution_metrics(
+        solution,
+        total_length,
+        B,
+        interfaces,
+        theta0=theta0,
+        end_margin=end_margin,
+        n_steps=n_steps,
+    )
+    return max_abs_moment_from_metrics(starts, lengths, B, points_per_segment=points_per_segment)
+
+
+def stage_parameter(value, stage_index):
+    if isinstance(value, (list, tuple, np.ndarray)):
+        if len(value) == 0:
+            return 0.0
+        return float(value[min(stage_index, len(value) - 1)])
+    return float(value)
 
 
 def solve_coupled_design(
@@ -743,11 +830,27 @@ def solve_coupled_design(
     end_margin=0.0,
     force_index=0,
     force_weights=(0.0, 1.0, 100.0),
+    move_final_x=False,
     radius=2.0,
     margin=0.1,
     min_dx=0.1,
+    min_internal_y=None,
+    model_weight=1.0,
     displacement_weight=1e-3,
     guard_weight=100.0,
+    floor_force_weight=0.0,
+    floor_y=0.0,
+    floor_band=0.05,
+    floor_internal_only=True,
+    peak_force_weight=0.0,
+    energy_weight=0.0,
+    moment_weight=0.0,
+    curvature_weight=0.0,
+    selection_floor_force_weight=0.0,
+    selection_peak_force_weight=0.0,
+    selection_moment_weight=0.0,
+    selection_curvature_weight=0.0,
+    strain_points_per_segment=60,
     n_steps=120,
     max_nfev=3000,
     polish_n_steps=400,
@@ -755,16 +858,41 @@ def solve_coupled_design(
     residual_tol=1e-5,
     tail_angle_tol=np.deg2rad(0.05),
     show_progress=True,
+    warm_start_inner=True,
+    feasibility_first=True,
+    advance_only_physical=True,
 ):
     if not -len(base_interfaces) <= force_index < len(base_interfaces):
         raise ValueError("force_index must select one interface.")
 
-    d0 = design_vector_from_interfaces(base_interfaces)
-    design_bounds = build_design_bounds(base_interfaces, radius=radius, margin=margin)
+    d0 = design_vector_from_interfaces(base_interfaces, move_final_x=move_final_x)
+    design_bounds = build_design_bounds(
+        base_interfaces,
+        radius=radius,
+        margin=margin,
+        move_final_x=move_final_x,
+        min_internal_y=min_internal_y,
+    )
 
     u0 = initial_guess(base_interfaces, total_length=total_length, end_margin=end_margin)
     if theta0 is not None:
         u0[2] = float(theta0)
+    warm_solution = None
+    if warm_start_inner:
+        warm = solve_segments(
+            total_length,
+            B,
+            base_interfaces,
+            u0=u0,
+            theta0=theta0,
+            end_margin=end_margin,
+            max_nfev=polish_max_nfev,
+            n_steps=polish_n_steps,
+        )
+        warm_solution = warm
+        u0 = warm.x.copy()
+        if theta0 is not None:
+            u0[2] = float(theta0)
 
     nd = d0.size
     w0 = np.concatenate([d0, u0])
@@ -793,9 +921,108 @@ def solve_coupled_design(
     history = []
     best = None
     best_score = np.inf
+    best_residual_entry = None
+    best_residual_score = np.inf
+    accepted_w = None
 
-    for force_weight in force_weights:
-        sqrt_force_weight = np.sqrt(float(force_weight))
+    if warm_solution is not None:
+        warm_interfaces = apply_design_vector(d0, base_interfaces, move_final_x=move_final_x)
+        warm_diag = physical_diagnostics(
+            warm_solution.x,
+            total_length,
+            B,
+            warm_interfaces,
+            theta0=theta0,
+            end_margin=end_margin,
+            n_steps=polish_n_steps,
+        )
+        warm_physical = is_physical_solution(
+            warm_solution.x,
+            total_length,
+            B,
+            warm_interfaces,
+            theta0=theta0,
+            end_margin=end_margin,
+            n_steps=polish_n_steps,
+            residual_tol=residual_tol,
+            tail_angle_tol=tail_angle_tol,
+        )
+        warm_target_force = float(np.linalg.norm(warm_diag["forces"][selected_force_index]))
+        warm_floor_forces = floor_contact_force_residuals(
+            warm_diag["forces"],
+            warm_interfaces,
+            floor_y=floor_y,
+            floor_band=floor_band,
+            internal_only=floor_internal_only,
+        )
+        warm_force_norms = np.linalg.norm(warm_diag["forces"], axis=1)
+        warm_energy = bending_energy(
+            warm_solution.x,
+            total_length,
+            B,
+            warm_interfaces,
+            points_per_segment=strain_points_per_segment,
+            end_margin=end_margin,
+            n_steps=polish_n_steps,
+        )
+        warm_moment = max_abs_moment(
+            warm_solution.x,
+            total_length,
+            B,
+            warm_interfaces,
+            theta0=theta0,
+            end_margin=end_margin,
+            n_steps=polish_n_steps,
+            points_per_segment=strain_points_per_segment,
+        )
+        warm_entry = {
+            "stage_label": "warm start",
+            "force_weight": 0.0,
+            "stage_result": warm_solution,
+            "solution": warm_solution,
+            "interfaces": warm_interfaces,
+            "design": d0.copy(),
+            "diagnostics": warm_diag,
+            "target_force": warm_target_force,
+            "floor_force": float(np.linalg.norm(warm_floor_forces)) if warm_floor_forces.size else 0.0,
+            "peak_force": float(np.max(warm_force_norms)) if warm_force_norms.size else 0.0,
+            "bending_energy": float(warm_energy),
+            "max_moment": float(warm_moment),
+            "max_curvature": float(warm_moment / abs(B)) if B != 0.0 else np.inf,
+            "physical": warm_physical,
+        }
+        history.append(warm_entry)
+        warm_residual_score = warm_diag["max_abs_residual"] + warm_diag["tail_straightness"]
+        if np.isfinite(warm_residual_score):
+            best_residual_entry = warm_entry
+            best_residual_score = warm_residual_score
+        if warm_physical:
+            warm_selection_score = (
+                warm_target_force
+                + selection_floor_force_weight * warm_entry["floor_force"]
+                + selection_peak_force_weight * warm_entry["peak_force"]
+                + selection_moment_weight * warm_entry["max_moment"]
+                + selection_curvature_weight * warm_entry["max_curvature"]
+            )
+            best = warm_entry
+            best_score = warm_selection_score
+            accepted_w = w0.copy()
+
+    for stage_index, force_weight in enumerate(force_weights):
+        force_weight = float(force_weight)
+        sqrt_force_weight = np.sqrt(force_weight)
+        extra_objectives_active = (not feasibility_first) or stage_index > 0 or force_weight > 0.0
+        stage_floor_force_weight = stage_parameter(floor_force_weight, stage_index) if extra_objectives_active else 0.0
+        stage_peak_force_weight = stage_parameter(peak_force_weight, stage_index) if extra_objectives_active else 0.0
+        stage_energy_weight = stage_parameter(energy_weight, stage_index) if extra_objectives_active else 0.0
+        stage_moment_weight = stage_parameter(moment_weight, stage_index) if extra_objectives_active else 0.0
+        stage_curvature_weight = stage_parameter(curvature_weight, stage_index) if extra_objectives_active else 0.0
+
+        sqrt_floor_force_weight = np.sqrt(stage_floor_force_weight)
+        sqrt_peak_force_weight = np.sqrt(stage_peak_force_weight)
+        sqrt_energy_weight = np.sqrt(stage_energy_weight)
+        sqrt_moment_weight = np.sqrt(stage_moment_weight)
+        sqrt_curvature_weight = np.sqrt(stage_curvature_weight)
 
         def residuals(w):
             d = w[:nd]
@@ -803,7 +1030,7 @@ def solve_coupled_design(
             if theta0 is not None:
                 u[2] = float(theta0)
 
-            interfaces = apply_design_vector(d, base_interfaces)
+            interfaces = apply_design_vector(d, base_interfaces, move_final_x=move_final_x)
             model_residual = make_residual(
                 total_length,
                 B,
@@ -813,7 +1040,7 @@ def solve_coupled_design(
             )(u)
 
             parts = [
-                model_residual,
+                model_weight * model_residual,
                 displacement_weight * (d - d0),
                 guard_weight * design_guard_residuals(
                     d,
@@ -821,10 +1048,18 @@ def solve_coupled_design(
                     total_length,
                     end_margin=end_margin,
                     min_dx=min_dx,
+                    move_final_x=move_final_x,
                 ),
             ]
 
-            if sqrt_force_weight > 0.0:
+            need_force_metrics = (
+                sqrt_force_weight > 0.0
+                or sqrt_floor_force_weight > 0.0
+                or sqrt_peak_force_weight > 0.0
+                or sqrt_moment_weight > 0.0
+                or sqrt_curvature_weight > 0.0
+            )
+            if need_force_metrics:
                 starts, ends, forces, lengths = solution_metrics(
                     u,
                     total_length,
@@ -834,7 +1069,56 @@ def solve_coupled_design(
                     end_margin=end_margin,
                     n_steps=n_steps,
                 )
+
+            if sqrt_force_weight > 0.0:
                 parts.append(np.array([sqrt_force_weight * np.linalg.norm(forces[selected_force_index])]))
+
+            if sqrt_floor_force_weight > 0.0:
+                parts.append(
+                    sqrt_floor_force_weight
+                    * floor_contact_force_residuals(
+                        forces,
+                        interfaces,
+                        floor_y=floor_y,
+                        floor_band=floor_band,
+                        internal_only=floor_internal_only,
+                    )
+                )
+
+            if sqrt_peak_force_weight > 0.0:
+                force_norms = np.linalg.norm(forces, axis=1)
+                parts.append(np.array([sqrt_peak_force_weight * np.max(force_norms)]))
+
+            if sqrt_energy_weight > 0.0:
+                energy = bending_energy(
+                    u,
+                    total_length,
+                    B,
+                    interfaces,
+                    points_per_segment=strain_points_per_segment,
+                    end_margin=end_margin,
+                    n_steps=n_steps,
+                )
+                parts.append(np.array([sqrt_energy_weight * np.sqrt(max(0.0, energy))]))
+
+            if sqrt_moment_weight > 0.0:
+                moment = max_abs_moment_from_metrics(
+                    starts,
+                    lengths,
+                    B,
+                    points_per_segment=strain_points_per_segment,
+                )
+                parts.append(np.array([sqrt_moment_weight * moment]))
+
+            if sqrt_curvature_weight > 0.0:
+                moment = max_abs_moment_from_metrics(
+                    starts,
+                    lengths,
+                    B,
+                    points_per_segment=strain_points_per_segment,
+                )
+                curvature = moment / abs(B) if B != 0.0 else np.inf
+                parts.append(np.array([sqrt_curvature_weight * curvature]))
 
             return np.concatenate(parts)
 
@@ -866,10 +1150,10 @@ def solve_coupled_design(
                 **least_squares_kwargs,
             )
 
-        w0 = stage_res.x.copy()
-        d = w0[:nd]
-        interfaces = apply_design_vector(d, base_interfaces)
-        u = w0[nd:].copy()
+        stage_w = stage_res.x.copy()
+        d = stage_w[:nd]
+        interfaces = apply_design_vector(d, base_interfaces, move_final_x=move_final_x)
+        u = stage_w[nd:].copy()
         if theta0 is not None:
             u[2] = float(theta0)
 
@@ -904,57 +1188,203 @@ def solve_coupled_design(
             tail_angle_tol=tail_angle_tol,
         )
         target_force = float(np.linalg.norm(diag["forces"][selected_force_index]))
-        score = target_force if physical else np.inf
+        floor_forces = floor_contact_force_residuals(
+            diag["forces"],
+            interfaces,
+            floor_y=floor_y,
+            floor_band=floor_band,
+            internal_only=floor_internal_only,
+        )
+        floor_force = float(np.linalg.norm(floor_forces)) if floor_forces.size else 0.0
+        force_norms = np.linalg.norm(diag["forces"], axis=1)
+        peak_force = float(np.max(force_norms)) if force_norms.size else 0.0
+        energy = bending_energy(
+            polished.x,
+            total_length,
+            B,
+            interfaces,
+            points_per_segment=strain_points_per_segment,
+            end_margin=end_margin,
+            n_steps=polish_n_steps,
+        )
+        moment = max_abs_moment(
+            polished.x,
+            total_length,
+            B,
+            interfaces,
+            theta0=theta0,
+            end_margin=end_margin,
+            n_steps=polish_n_steps,
+            points_per_segment=strain_points_per_segment,
+        )
+        residual_score = diag["max_abs_residual"] + diag["tail_straightness"]
 
         entry = {
-            "force_weight": float(force_weight),
+            "stage_label": f"force={force_weight:g}, curv={stage_curvature_weight:g}",
+            "force_weight": force_weight,
+            "curvature_weight": stage_curvature_weight,
             "stage_result": stage_res,
             "solution": polished,
             "interfaces": interfaces,
             "design": d.copy(),
             "diagnostics": diag,
             "target_force": target_force,
+            "floor_force": floor_force,
+            "peak_force": peak_force,
+            "bending_energy": float(energy),
+            "max_moment": float(moment),
+            "max_curvature": float(moment / abs(B)) if B != 0.0 else np.inf,
             "physical": physical,
         }
+        score = (
+            target_force
+            + selection_floor_force_weight * floor_force
+            + selection_peak_force_weight * peak_force
+            + selection_moment_weight * moment
+            + selection_curvature_weight * entry["max_curvature"]
+            if physical
+            else np.inf
+        )
         history.append(entry)
+
+        if np.isfinite(residual_score) and residual_score < best_residual_score:
+            best_residual_entry = entry
+            best_residual_score = residual_score
 
         if score < best_score:
             best = entry
             best_score = score
+            accepted_w = stage_w.copy()
+
+        if physical or not advance_only_physical:
+            w0 = stage_w.copy()
+        elif accepted_w is not None:
+            w0 = accepted_w.copy()
 
     if best is None:
-        best = history[-1]
+        if warm_solution is not None and is_physical_solution(
+            warm_solution.x,
+            total_length,
+            B,
+            base_interfaces,
+            theta0=theta0,
+            end_margin=end_margin,
+            n_steps=polish_n_steps,
+            residual_tol=residual_tol,
+            tail_angle_tol=tail_angle_tol,
+        ):
+            return warm_solution, apply_design_vector(d0, base_interfaces, move_final_x=move_final_x), d0.copy(), history
+        best = best_residual_entry if best_residual_entry is not None else history[-1]
 
     return best["solution"], best["interfaces"], best["design"], history
 
 
-def top_coupled_candidates(history, top_n=3, physical_only=True):
+def coupled_candidate_score(
+    entry,
+    force_weight=1.0,
+    floor_force_weight=0.0,
+    peak_force_weight=0.0,
+    energy_weight=0.0,
+    moment_weight=0.0,
+    curvature_weight=0.0,
+):
+    return (
+        force_weight * entry["target_force"]
+        + floor_force_weight * entry.get("floor_force", 0.0)
+        + peak_force_weight * entry.get("peak_force", 0.0)
+        + energy_weight * entry.get("bending_energy", 0.0)
+        + moment_weight * entry.get("max_moment", 0.0)
+        + curvature_weight * entry.get("max_curvature", 0.0)
+    )
+
+
+def top_coupled_candidates(
+    history,
+    top_n=3,
+    physical_only=True,
+    force_weight=1.0,
+    floor_force_weight=0.0,
+    peak_force_weight=0.0,
+    energy_weight=0.0,
+    moment_weight=0.0,
+    curvature_weight=0.0,
+):
     candidates = []
     for entry in history:
         if physical_only and not entry["physical"]:
             continue
         candidates.append(entry)
 
-    candidates.sort(key=lambda entry: entry["target_force"])
+    candidates.sort(
+        key=lambda entry: coupled_candidate_score(
+            entry,
+            force_weight=force_weight,
+            floor_force_weight=floor_force_weight,
+            peak_force_weight=peak_force_weight,
+            energy_weight=energy_weight,
+            moment_weight=moment_weight,
+            curvature_weight=curvature_weight,
+        )
+    )
     return candidates[:top_n]
 
 
-def print_coupled_candidate_leaderboard(history, top_n=3, physical_only=True):
-    candidates = top_coupled_candidates(history, top_n=top_n, physical_only=physical_only)
+def print_coupled_candidate_leaderboard(
+    history,
+    top_n=3,
+    physical_only=True,
+    force_weight=1.0,
+    floor_force_weight=0.0,
+    peak_force_weight=0.0,
+    energy_weight=0.0,
+    moment_weight=0.0,
+    curvature_weight=0.0,
+):
+    candidates = top_coupled_candidates(
+        history,
+        top_n=top_n,
+        physical_only=physical_only,
+        force_weight=force_weight,
+        floor_force_weight=floor_force_weight,
+        peak_force_weight=peak_force_weight,
+        energy_weight=energy_weight,
+        moment_weight=moment_weight,
+        curvature_weight=curvature_weight,
+    )
     if not candidates:
         print("No physical candidates found for leaderboard.")
         return
 
-    print(f"Top {len(candidates)} candidates by selected contact force:")
+    print(f"\nTop {len(candidates)} candidates by leaderboard score:")
+    if len(candidates) < top_n:
+        print(f"Only {len(candidates)} physical candidate(s) passed the strict residual/tail gate.")
+    print(
+        "   "
+        f"{'score':>11} {'force':>11} {'floor':>11} {'peak':>11} "
+        f"{'curv':>11} {'max_res':>11} {'tail_deg':>11}  stage"
+    )
     for rank, entry in enumerate(candidates, start=1):
         diag = entry["diagnostics"]
-        print(
-            f"{rank}. force={entry['target_force']:.6g}, "
-            f"force_weight={entry['force_weight']:.4g}, "
-            f"max_res={diag['max_abs_residual']:.4g}, "
-            f"tail_delta={diag['tail_straightness'] * 180 / np.pi:.4g} deg"
+        score = coupled_candidate_score(
+            entry,
+            force_weight=force_weight,
+            floor_force_weight=floor_force_weight,
+            peak_force_weight=peak_force_weight,
+            energy_weight=energy_weight,
+            moment_weight=moment_weight,
+            curvature_weight=curvature_weight,
         )
-        print(np.array2string(entry["design"], precision=6))
+        label = entry.get("stage_label", f"force={entry['force_weight']:.4g}")
+        print(
+            f"{rank:>2}. "
+            f"{fmt_float(score)} {fmt_float(entry['target_force'])} "
+            f"{fmt_float(entry.get('floor_force', 0.0))} "
+            f"{fmt_float(entry.get('peak_force', 0.0))} "
+            f"{fmt_float(entry.get('max_curvature', 0.0))} "
+            f"{fmt_float(diag['max_abs_residual'])} "
+            f"{fmt_float(deg(diag['tail_straightness']))}  {label}"
+        )
+        print(f"    d = {fmt_array(entry['design'], fixed=6)}")
 
 
 def remove_theta_targets(interfaces):
@@ -1064,21 +1494,69 @@ def main():
     
     interfaces = [
         {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
+        {"type": "con", "x": 2.55, "y": 0.21},
+        {"type": "con", "x": 4.72, "y": 1.05},
+        {"type": "con", "x": 6.24, "y": 2.24},
+        {"type": "con", "x": 6.44, "y": 3.54},
+        {"type": "con", "x": 8.04, "y": 4.1725, "normal": [0.0, -1.0]},
+    ]
+    
+    interfaces = [
+        {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
+        {"type": "con", "x": 0.617187, "y": 7.828e-06},
+        {"type": "con", "x": 7.538562, "y": 2.288121},
+        {"type": "con", "x": 7.998379, "y": 2.943014},
+        {"type": "con", "x": 12, "y": 4.1725, "normal": [0.0, -1.0]},
+    ]
+    
+    interfaces = [
+        {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
         {"type": "con", "x": 2.388, "y": 1.037e-05},
         {"type": "con", "x": 6.29, "y": 2.238},
         {"type": "con", "x": 6.39, "y": 3.54},
         {"type": "con", "x": 8, "y": 4.1725, "normal": [0.0, -1.0]},
     ]
+    
+    
+    
 
-    total_length = 15.0
+    total_length = 100.0
     end_margin = 0.5
     theta0 = None
     B = 8.5e-3
+    export_mirrored_pdf = True
+    mirrored_pdf_path = "Curve_1.pdf"
+    beam_half_thickness = 0.33/2
+    contact_size = 1.0
+    contact_force_offset = -beam_half_thickness - contact_size
+    pdf_points_per_segment = 2000
 
     sol = solve_segments(total_length, B, interfaces=interfaces, theta0=theta0, end_margin=end_margin, max_nfev=2000, n_steps=400)
 
     print("Initial free evaluation:")
     continuity_diagnostics(sol.x, total_length, B, interfaces, theta0, end_margin)
+    
+    if export_mirrored_pdf:
+        save_mirrored_pdf(
+            sol.x,
+            total_length,
+            interfaces,
+            B,
+            beam_profile,
+            path=mirrored_pdf_path,
+            beam_profile_kwargs={"end_margin": end_margin},
+            unit_mm=1.0,
+            margin=1.0,
+            beam_center_offset=beam_half_thickness,
+            beam_radius=beam_half_thickness,
+            contact_force_offset=contact_force_offset,
+            contact_radius=contact_size,
+            points_per_segment=pdf_points_per_segment,
+        )
+        print(f"Saved mirrored 1:1 PDF to {mirrored_pdf_path}")
+
+
+
     plot_solution(
         sol.x,
         total_length,
@@ -1092,7 +1570,7 @@ def main():
 
     theta0 = 0.0
     interfaces[-1]["theta"] = 0.0
-    constraint = 0.1
+    constraint = 0.2
 
     sol_check, interfaces_check, optimal_d, history = solve_coupled_design(
         total_length,
@@ -1101,30 +1579,72 @@ def main():
         theta0=theta0,
         end_margin=end_margin,
         force_index=0,
-        force_weights=(0.0, 1.0, 10.0, 100.0, 300.0),
+        force_weights=(0.0, 1.0, 10.0, 100.0, 300.0, 30.0, 3.0, 0.3, 0.0),
+        move_final_x=True,
         radius=2.0,
         margin=constraint,
         min_dx=constraint,
+        min_internal_y=0.2,
+        model_weight=100.0,
+        floor_force_weight=0.05,
+        floor_y=0.0,
+        floor_band=0.05,
+        floor_internal_only=True,
+        peak_force_weight=0.0,
+        moment_weight=0.0,
+        curvature_weight=(0.0, 0.0, 0.0, 0.0, 0.0, 1e-8, 3e-8, 1e-7, 3e-7),
+        selection_floor_force_weight=0.25,
+        selection_peak_force_weight=0.0,
+        selection_moment_weight=0.0,
+        selection_curvature_weight=0.0,
         residual_tol=1e-5,
     )
 
     for entry in history:
         diag = entry["diagnostics"]
+        label = entry.get("stage_label", f"force={entry['force_weight']:.4g}")
         print(
-            f"stage force_weight={entry['force_weight']:.4g}: "
-            f"physical={entry['physical']}, "
-            f"target_force={entry['target_force']:.4g}, "
-            f"max_res={diag['max_abs_residual']:.4g}, "
-            f"tail_delta={diag['tail_straightness'] * 180 / np.pi:.4g} deg"
+            f"stage {label:<20} "
+            f"physical={str(entry['physical']):<5} "
+            f"force={fmt_float(entry['target_force'])} "
+            f"floor={fmt_float(entry['floor_force'])} "
+            f"peak={fmt_float(entry['peak_force'])} "
+            f"curv={fmt_float(entry['max_curvature'])} "
+            f"max_res={fmt_float(diag['max_abs_residual'])} "
+            f"tail_deg={fmt_float(deg(diag['tail_straightness']))}"
         )
 
-    print_coupled_candidate_leaderboard(history, top_n=3, physical_only=True)
+    print("Leaderboard: force plus floor-contact force")
+    print_coupled_candidate_leaderboard(
+        history,
+        top_n=3,
+        physical_only=True,
+        force_weight=1.0,
+        floor_force_weight=0.25,
+    )
+    print("Leaderboard: lowest peak curvature")
+    print_coupled_candidate_leaderboard(
+        history,
+        top_n=3,
+        physical_only=True,
+        force_weight=0.0,
+        curvature_weight=1.0,
+    )
+    curvature_candidates = top_coupled_candidates(
+        history,
+        top_n=1,
+        physical_only=True,
+        force_weight=0.0,
+        curvature_weight=1.0,
+    )
+    curvature_entry = curvature_candidates[0] if curvature_candidates else None
 
     continuity_diagnostics(sol_check.x, total_length, B, interfaces_check, theta0=0.0, end_margin=end_margin)
     if is_physical_solution(sol_check.x, total_length, B, interfaces_check, theta0=0.0, end_margin=end_margin, residual_tol=1e-5):
         print(f"Optimal interface positions:")
-        print(np.array2string(optimal_d, precision=6))
-        print(f"inner cost = {sol_check.cost:.4g}")
+        print("design vector = [x1, y1, x2, y2, ..., final_x]")
+        print(fmt_array(optimal_d, fixed=6))
+        print(f"inner cost = {fmt_float(sol_check.cost)}")
         plot_solution(
             sol_check.x,
             total_length,
@@ -1159,6 +1679,48 @@ def main():
         beam_profile_kwargs={"end_margin": end_margin},
         solve_segments_kwargs={"theta0": None, "end_margin": end_margin},
     )
+
+    if curvature_entry is not None and not np.allclose(curvature_entry["design"], optimal_d, rtol=1e-5, atol=1e-7):
+        print("Lowest-curvature physical candidate:")
+        print("design vector = [x1, y1, x2, y2, ..., final_x]")
+        print(fmt_array(curvature_entry["design"], fixed=6))
+        continuity_diagnostics(
+            curvature_entry["solution"].x,
+            total_length,
+            B,
+            curvature_entry["interfaces"],
+            theta0=0.0,
+            end_margin=end_margin,
+        )
+
+        curvature_free_sol, curvature_free_interfaces = solve_free_evaluation(
+            total_length,
+            B,
+            curvature_entry["interfaces"],
+            u0=curvature_entry["solution"].x,
+            end_margin=end_margin,
+            max_nfev=4000,
+            n_steps=400,
+        )
+        print("Lowest-curvature free evaluation with theta constraints removed:")
+        continuity_diagnostics(
+            curvature_free_sol.x,
+            total_length,
+            B,
+            curvature_free_interfaces,
+            theta0=None,
+            end_margin=end_margin,
+        )
+        plot_solution(
+            curvature_free_sol.x,
+            total_length,
+            curvature_free_interfaces,
+            B,
+            beam_profile,
+            solve_segments,
+            beam_profile_kwargs={"end_margin": end_margin},
+            solve_segments_kwargs={"theta0": None, "end_margin": end_margin},
+        )
 
 
 if __name__ == "__main__":
