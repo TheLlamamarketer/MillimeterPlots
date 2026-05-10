@@ -2,7 +2,6 @@ import numpy as  np
 from scipy.integrate import solve_ivp
 from scipy.optimize import least_squares, minimize, NonlinearConstraint
 from numba import njit
-
 from beam_elastica_plot import plot_solution, save_mirrored_pdf
 from numba_progress import ProgressBar
 
@@ -836,7 +835,7 @@ def solve_coupled_design(
     min_dx=0.1,
     min_internal_y=None,
     model_weight=1.0,
-    displacement_weight=1e-3,
+    displacement_weight=0,
     guard_weight=100.0,
     floor_force_weight=0.0,
     floor_y=0.0,
@@ -1492,35 +1491,26 @@ def make_outer_objective(
 
 def main():
     
-    interfaces = [
-        {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
-        {"type": "con", "x": 2.55, "y": 0.21},
-        {"type": "con", "x": 4.72, "y": 1.05},
-        {"type": "con", "x": 6.24, "y": 2.24},
-        {"type": "con", "x": 6.44, "y": 3.54},
-        {"type": "con", "x": 8.04, "y": 4.1725, "normal": [0.0, -1.0]},
-    ]
     
     interfaces = [
         {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
-        {"type": "con", "x": 0.617187, "y": 7.828e-06},
-        {"type": "con", "x": 7.538562, "y": 2.288121},
-        {"type": "con", "x": 7.998379, "y": 2.943014},
-        {"type": "con", "x": 12, "y": 4.1725, "normal": [0.0, -1.0]},
+        {"type": "con", "x": 6.149106, "y": 0},
+        {"type": "con", "x": 31.077009, "y": 2.442808},
+        {"type": "con", "x": 32.071849, "y": 2.759621},
+        {"type": "con", "x": 40.254345, "y": 4.1725, "normal": [0.0, -1.0]},
     ]
+    
     
     interfaces = [
         {"type": "con", "x": 0, "y": 0, "normal": [0.0, 1.0]},
-        {"type": "con", "x": 2.388, "y": 1.037e-05},
-        {"type": "con", "x": 6.29, "y": 2.238},
-        {"type": "con", "x": 6.39, "y": 3.54},
-        {"type": "con", "x": 8, "y": 4.1725, "normal": [0.0, -1.0]},
+        {"type": "con", "x": 17.393621, "y": 0.806008},
+        {"type": "con", "x": 23.862690, "y": 2.023335},
+        {"type": "con", "x": 32.490581, "y": 3.863175},
+        {"type": "con", "x": 39.852547, "y": 4.1725, "normal": [0.0, -1.0]},
     ]
-    
-    
-    
 
-    total_length = 100.0
+    
+    total_length = 50.0
     end_margin = 0.5
     theta0 = None
     B = 8.5e-3
@@ -1570,7 +1560,7 @@ def main():
 
     theta0 = 0.0
     interfaces[-1]["theta"] = 0.0
-    constraint = 0.2
+    constraint = 1.0
 
     sol_check, interfaces_check, optimal_d, history = solve_coupled_design(
         total_length,
@@ -1579,25 +1569,26 @@ def main():
         theta0=theta0,
         end_margin=end_margin,
         force_index=0,
-        force_weights=(0.0, 1.0, 10.0, 100.0, 300.0, 30.0, 3.0, 0.3, 0.0),
+        force_weights=(0.0, 1.0, 10.0, 100.0, 300.0),
         move_final_x=True,
-        radius=2.0,
+        radius=10.0,
         margin=constraint,
         min_dx=constraint,
-        min_internal_y=0.2,
+        min_internal_y=0.0,
         model_weight=100.0,
-        floor_force_weight=0.05,
-        floor_y=0.0,
+        floor_force_weight=(0.0, 0.05, 0.05, 0.05, 0.05),
+        floor_y=0.01,
         floor_band=0.05,
         floor_internal_only=True,
         peak_force_weight=0.0,
         moment_weight=0.0,
-        curvature_weight=(0.0, 0.0, 0.0, 0.0, 0.0, 1e-8, 3e-8, 1e-7, 3e-7),
+        curvature_weight=(0.0, 0.0, 0.0, 0.0, 0.0),
         selection_floor_force_weight=0.25,
         selection_peak_force_weight=0.0,
         selection_moment_weight=0.0,
         selection_curvature_weight=0.0,
         residual_tol=1e-5,
+        advance_only_physical=True,
     )
 
     for entry in history:

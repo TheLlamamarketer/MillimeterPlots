@@ -86,6 +86,12 @@ def save_mirrored_pdf(
     if contact_force_offset != 0.0:
         upper_joints += contact_force_offset * force_directions(forces, interfaces=interfaces, mirror_y=False)
         mirrored_joints += contact_force_offset * force_directions(forces, interfaces=interfaces, mirror_y=True)
+    contact_points = upper_joints.copy()
+    if contact_radius is not None and contact_force_offset != 0.0:
+        contact_points -= np.sign(contact_force_offset) * contact_radius * force_directions(forces, interfaces=interfaces)
+    print("Contact surface positions:")
+    for i, (cx, cy) in enumerate(contact_points, start=1):
+        print(f"  contact {i:>2}: x={fmt_float(cx)}, y={fmt_float(cy)}")
 
     # Avoid drawing duplicate mirrored copies of contacts that lie on the mirror axis.
     if skip_unoffset_axis_duplicates and beam_center_offset == 0.0 and contact_force_offset == 0.0:
